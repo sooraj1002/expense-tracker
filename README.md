@@ -1,0 +1,1 @@
+- Built by following and learning along https://dev.to/aurelievache/learning-go-by-examples-part-3-create-a-cli-app-in-go-1h43 along with help from chatgpt to augment my knowledge gaps
