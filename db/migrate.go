@@ -13,6 +13,7 @@ import (
 // RunMigrations executes all migration files in the migrations directory
 func RunMigrations(db *sql.DB, migrationsPath string) error {
 	// Create migrations table if it doesn't exist
+	logger.Log.Info("Creating schema_migrations table if not exists...")
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version VARCHAR(255) PRIMARY KEY,
@@ -22,6 +23,22 @@ func RunMigrations(db *sql.DB, migrationsPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create migrations table: %w", err)
 	}
+	logger.Log.Info("schema_migrations table ready")
+
+	// Debug: Check what's in schema_migrations
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count)
+	logger.Log.Infof("schema_migrations currently has %d records", count)
+
+	if count > 0 {
+		rows, _ := db.Query("SELECT version FROM schema_migrations ORDER BY version")
+		defer rows.Close()
+		for rows.Next() {
+			var v string
+			rows.Scan(&v)
+			logger.Log.Infof("  - %s", v)
+		}
+	}
 
 	// Get list of migration files
 	files, err := filepath.Glob(filepath.Join(migrationsPath, "*.sql"))
@@ -30,6 +47,7 @@ func RunMigrations(db *sql.DB, migrationsPath string) error {
 	}
 
 	sort.Strings(files)
+	logger.Log.Infof("Found %d migration files in %s", len(files), migrationsPath)
 
 	// Execute each migration
 	for _, file := range files {
@@ -42,6 +60,8 @@ func RunMigrations(db *sql.DB, migrationsPath string) error {
 			return fmt.Errorf("failed to check migration status: %w", err)
 		}
 
+		logger.Log.Infof("Checking migration %s: exists=%v", version, exists)
+
 		if exists {
 			logger.Log.Infof("Migration %s already applied, skipping", version)
 			continue
@@ -53,6 +73,7 @@ func RunMigrations(db *sql.DB, migrationsPath string) error {
 			return fmt.Errorf("failed to read migration file %s: %w", file, err)
 		}
 
+		logger.Log.Infof("Executing migration %s...", version)
 		_, err = db.Exec(string(content))
 		if err != nil {
 			return fmt.Errorf("failed to execute migration %s: %w", version, err)

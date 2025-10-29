@@ -31,7 +31,9 @@ var serveCmd = &cobra.Command{
 		)
 
 		// Initialize database
-		dbConn, err := db.InitDB(config.AppConfig.GetDatabaseDSN())
+		dsn := config.AppConfig.GetDatabaseDSN()
+		logger.Log.Infow("Connecting to database", "dsn", dsn)
+		dbConn, err := db.InitDB(dsn)
 		if err != nil {
 			logger.Log.Fatalw("Failed to initialize database", "error", err)
 		}
