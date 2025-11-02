@@ -7,6 +7,13 @@ YOU are creating an expense tracking app which will work on a google pixel 9, so
 Similar to how truecaller works with its notifcations -- reads the notifications, get the merchant. if classification isnt possible, then a basic location should be recorded... the android app will do a lot of the heavy lifiting tbh. the backend will just be to store. and during the day, it will all be on the local storage of the app, and will be synced using rsync to google drive.
 
 
+## Infrastructure
+
+- **Database**: PostgreSQL running in a Docker container
+  - Database name: `expense_tracker`
+  - Default user: `postgres`
+
+
 ## Development process
 
 - When making any changes for any task, in ./progress/{task}.md, keep an updated log of your todo list, your plan for executing the todo list as a basic overview for a reviewer. keep checking off/adding/updating items as you come across more things you need to account for while working on the task at hand. Only start working on a task after the initial plan stored in progress has been reviewed and accepted. This rule is non-negotiable for anything where you would be making code changes.

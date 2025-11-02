@@ -1,18 +1,18 @@
 package handlers
 
 import (
-	"database/sql"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/sooraj1002/expense-tracker/api/middleware"
 	"github.com/sooraj1002/expense-tracker/config"
 	"github.com/sooraj1002/expense-tracker/db"
 	"github.com/sooraj1002/expense-tracker/logger"
 	"github.com/sooraj1002/expense-tracker/models"
 	"github.com/sooraj1002/expense-tracker/utils"
+	"gorm.io/gorm"
 )
 
 // Register handles user registration
@@ -27,9 +27,8 @@ func Register(c *gin.Context) {
 	}
 
 	// Check if user already exists
-	var exists bool
-	err := db.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)", req.Email).Scan(&exists)
-	if err != nil {
+	var count int64
+	if err := db.DB.Model(&models.User{}).Where("email = ?", req.Email).Count(&count).Error; err != nil {
 		logger.Log.Errorw("Failed to check user existence", "error", err)
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
 			models.ErrCodeDatabaseError,
@@ -38,7 +37,7 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	if exists {
+	if count > 0 {
 		c.JSON(http.StatusConflict, models.NewErrorResponse(
 			models.ErrCodeConflict,
 			"User with this email already exists",
@@ -58,15 +57,13 @@ func Register(c *gin.Context) {
 	}
 
 	// Create user
-	var user models.User
-	err = db.DB.QueryRow(`
-		INSERT INTO users (email, password_hash, name, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, email, name, created_at, last_login_at, updated_at
-	`, req.Email, passwordHash, req.Name, time.Now(), time.Now()).Scan(
-		&user.ID, &user.Email, &user.Name, &user.CreatedAt, &user.LastLoginAt, &user.UpdatedAt,
-	)
-	if err != nil {
+	user := models.User{
+		Email:        req.Email,
+		PasswordHash: passwordHash,
+		Name:         req.Name,
+	}
+
+	if err := db.DB.Create(&user).Error; err != nil {
 		logger.Log.Errorw("Failed to create user", "error", err)
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
 			models.ErrCodeDatabaseError,
@@ -107,14 +104,8 @@ func Login(c *gin.Context) {
 
 	// Get user from database
 	var user models.User
-	var passwordHash string
-	err := db.DB.QueryRow(`
-		SELECT id, email, password_hash, name, created_at, last_login_at, updated_at
-		FROM users WHERE email = $1
-	`, req.Email).Scan(
-		&user.ID, &user.Email, &passwordHash, &user.Name, &user.CreatedAt, &user.LastLoginAt, &user.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
+	err := db.DB.Where("email = ?", req.Email).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusUnauthorized, models.NewErrorResponse(
 			models.ErrCodeUnauthorized,
 			"Invalid email or password",
@@ -131,7 +122,7 @@ func Login(c *gin.Context) {
 	}
 
 	// Check password
-	if !utils.CheckPassword(req.Password, passwordHash) {
+	if !utils.CheckPassword(req.Password, user.PasswordHash) {
 		c.JSON(http.StatusUnauthorized, models.NewErrorResponse(
 			models.ErrCodeUnauthorized,
 			"Invalid email or password",
@@ -141,8 +132,7 @@ func Login(c *gin.Context) {
 
 	// Update last login time
 	now := time.Now()
-	_, err = db.DB.Exec("UPDATE users SET last_login_at = $1 WHERE id = $2", now, user.ID)
-	if err != nil {
+	if err := db.DB.Model(&user).Update("last_login_at", now).Error; err != nil {
 		logger.Log.Warnw("Failed to update last login time", "error", err, "userId", user.ID)
 	}
 	user.LastLoginAt = &now
@@ -218,13 +208,8 @@ func GetMe(c *gin.Context) {
 	}
 
 	var user models.User
-	err = db.DB.QueryRow(`
-		SELECT id, email, name, created_at, last_login_at, updated_at
-		FROM users WHERE id = $1
-	`, userID).Scan(
-		&user.ID, &user.Email, &user.Name, &user.CreatedAt, &user.LastLoginAt, &user.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
+	err = db.DB.Where("id = ?", userID).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusNotFound, models.NewErrorResponse(
 			models.ErrCodeNotFound,
 			"User not found",
@@ -264,21 +249,14 @@ func RegisterDevice(c *gin.Context) {
 	}
 
 	// Check if device already exists
-	var existingID uuid.UUID
-	err = db.DB.QueryRow("SELECT id FROM devices WHERE device_id = $1", req.DeviceID).Scan(&existingID)
+	var device models.Device
+	err = db.DB.Where("device_id = ?", req.DeviceID).First(&device).Error
 	if err == nil {
 		// Device exists, update it
-		var device models.Device
-		err = db.DB.QueryRow(`
-			UPDATE devices
-			SET device_name = $1, updated_at = $2
-			WHERE device_id = $3
-			RETURNING id, user_id, device_id, device_name, registered_at, last_sync_at, created_at, updated_at
-		`, req.DeviceName, time.Now(), req.DeviceID).Scan(
-			&device.ID, &device.UserID, &device.DeviceID, &device.DeviceName,
-			&device.RegisteredAt, &device.LastSyncAt, &device.CreatedAt, &device.UpdatedAt,
-		)
-		if err != nil {
+		device.DeviceName = req.DeviceName
+		device.UpdatedAt = time.Now()
+
+		if err := db.DB.Save(&device).Error; err != nil {
 			logger.Log.Errorw("Failed to update device", "error", err)
 			c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
 				models.ErrCodeDatabaseError,
@@ -291,18 +269,25 @@ func RegisterDevice(c *gin.Context) {
 		return
 	}
 
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		logger.Log.Errorw("Failed to check device", "error", err)
+		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+			models.ErrCodeDatabaseError,
+			"Failed to check device",
+		))
+		return
+	}
+
 	// Create new device
-	var device models.Device
 	now := time.Now()
-	err = db.DB.QueryRow(`
-		INSERT INTO devices (user_id, device_id, device_name, registered_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, user_id, device_id, device_name, registered_at, last_sync_at, created_at, updated_at
-	`, userID, req.DeviceID, req.DeviceName, now, now, now).Scan(
-		&device.ID, &device.UserID, &device.DeviceID, &device.DeviceName,
-		&device.RegisteredAt, &device.LastSyncAt, &device.CreatedAt, &device.UpdatedAt,
-	)
-	if err != nil {
+	device = models.Device{
+		UserID:       userID,
+		DeviceID:     req.DeviceID,
+		DeviceName:   req.DeviceName,
+		RegisteredAt: now,
+	}
+
+	if err := db.DB.Create(&device).Error; err != nil {
 		logger.Log.Errorw("Failed to register device", "error", err)
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
 			models.ErrCodeDatabaseError,

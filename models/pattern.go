@@ -7,16 +7,16 @@ import (
 )
 
 type MerchantPattern struct {
-	ID           uuid.UUID  `json:"id" db:"id"`
-	UserID       uuid.UUID  `json:"userId" db:"user_id"`
-	MerchantName string     `json:"merchantName" db:"merchant_name" binding:"required"`
-	CategoryID   uuid.UUID  `json:"categoryId" db:"category_id" binding:"required"`
-	MatchType    string     `json:"matchType" db:"match_type"`
-	IsActive     bool       `json:"isActive" db:"is_active"`
-	UseCount     int        `json:"useCount" db:"use_count"`
-	LastUsedAt   *time.Time `json:"lastUsedAt,omitempty" db:"last_used_at"`
-	CreatedAt    time.Time  `json:"createdAt" db:"created_at"`
-	UpdatedAt    time.Time  `json:"updatedAt" db:"updated_at"`
+	ID           uuid.UUID  `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	UserID       uuid.UUID  `json:"userId" gorm:"type:uuid;column:user_id;not null;index"`
+	MerchantName string     `json:"merchantName" gorm:"column:merchant_name;not null" binding:"required"`
+	CategoryID   uuid.UUID  `json:"categoryId" gorm:"type:uuid;column:category_id;not null" binding:"required"`
+	MatchType    string     `json:"matchType" gorm:"column:match_type;default:'exact'"`
+	IsActive     bool       `json:"isActive" gorm:"column:is_active;default:true"`
+	UseCount     int        `json:"useCount" gorm:"column:use_count;default:0"`
+	LastUsedAt   *time.Time `json:"lastUsedAt,omitempty" gorm:"column:last_used_at"`
+	CreatedAt    time.Time  `json:"createdAt" gorm:"autoCreateTime"`
+	UpdatedAt    time.Time  `json:"updatedAt" gorm:"autoUpdateTime"`
 }
 
 type CreatePatternRequest struct {

@@ -4,16 +4,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type User struct {
-	ID          uuid.UUID  `json:"id" db:"id"`
-	Email       string     `json:"email" db:"email" binding:"required,email"`
-	PasswordHash string    `json:"-" db:"password_hash"`
-	Name        string     `json:"name" db:"name" binding:"required"`
-	CreatedAt   time.Time  `json:"createdAt" db:"created_at"`
-	LastLoginAt *time.Time `json:"lastLoginAt,omitempty" db:"last_login_at"`
-	UpdatedAt   time.Time  `json:"updatedAt" db:"updated_at"`
+	ID           uuid.UUID  `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	Email        string     `json:"email" gorm:"uniqueIndex;not null" binding:"required,email"`
+	PasswordHash string     `json:"-" gorm:"column:password_hash;not null"`
+	Name         string     `json:"name" gorm:"not null" binding:"required"`
+	CreatedAt    time.Time  `json:"createdAt" gorm:"autoCreateTime"`
+	LastLoginAt  *time.Time `json:"lastLoginAt,omitempty" gorm:"column:last_login_at"`
+	UpdatedAt    time.Time  `json:"updatedAt" gorm:"autoUpdateTime"`
+}
+
+func (User) BeforeCreate(tx *gorm.DB) error {
+	return nil
 }
 
 type RegisterRequest struct {

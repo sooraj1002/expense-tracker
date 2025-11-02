@@ -7,21 +7,21 @@ import (
 )
 
 type Expense struct {
-	ID           uuid.UUID  `json:"id" db:"id"`
-	UserID       uuid.UUID  `json:"userId" db:"user_id"`
-	Amount       float64    `json:"amount" db:"amount" binding:"required,gt=0"`
-	CategoryID   uuid.UUID  `json:"categoryId" db:"category_id" binding:"required"`
-	AccountID    uuid.UUID  `json:"accountId" db:"account_id" binding:"required"`
-	Date         time.Time  `json:"date" db:"date" binding:"required"`
-	Description  string     `json:"description,omitempty" db:"description"`
-	Source       string     `json:"source" db:"source"`
-	MerchantID   *uuid.UUID `json:"merchantId,omitempty" db:"merchant_id"`
-	MerchantName string     `json:"merchantName,omitempty" db:"merchant_name"`
-	LocationID   *uuid.UUID `json:"locationId,omitempty" db:"location_id"`
-	RawData      string     `json:"rawData,omitempty" db:"raw_data"`
-	Verified     bool       `json:"verified" db:"verified"`
-	CreatedAt    time.Time  `json:"createdAt" db:"created_at"`
-	UpdatedAt    time.Time  `json:"updatedAt" db:"updated_at"`
+	ID           uuid.UUID  `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	UserID       uuid.UUID  `json:"userId" gorm:"type:uuid;column:user_id;not null;index"`
+	Amount       float64    `json:"amount" gorm:"type:decimal(15,2);not null" binding:"required,gt=0"`
+	CategoryID   uuid.UUID  `json:"categoryId" gorm:"type:uuid;column:category_id;not null;index" binding:"required"`
+	AccountID    uuid.UUID  `json:"accountId" gorm:"type:uuid;column:account_id;not null;index" binding:"required"`
+	Date         time.Time  `json:"date" gorm:"not null;index" binding:"required"`
+	Description  string     `json:"description,omitempty" gorm:"type:text"`
+	Source       string     `json:"source" gorm:"default:'manual'"`
+	MerchantID   *uuid.UUID `json:"merchantId,omitempty" gorm:"type:uuid;column:merchant_id;index"`
+	MerchantName string     `json:"merchantName,omitempty" gorm:"column:merchant_name"`
+	LocationID   *uuid.UUID `json:"locationId,omitempty" gorm:"type:uuid;column:location_id"`
+	RawData      string     `json:"rawData,omitempty" gorm:"column:raw_data;type:text"`
+	Verified     bool       `json:"verified" gorm:"default:false"`
+	CreatedAt    time.Time  `json:"createdAt" gorm:"autoCreateTime"`
+	UpdatedAt    time.Time  `json:"updatedAt" gorm:"autoUpdateTime"`
 }
 
 type CreateExpenseRequest struct {

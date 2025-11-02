@@ -7,30 +7,30 @@ import (
 )
 
 type SyncStatus struct {
-	ID                 uuid.UUID  `json:"id" db:"id"`
-	UserID             uuid.UUID  `json:"userId" db:"user_id"`
-	DeviceID           string     `json:"deviceId" db:"device_id"`
-	DeviceName         string     `json:"deviceName" db:"device_name"`
-	LastSyncTime       *time.Time `json:"lastSyncTime,omitempty" db:"last_sync_time"`
-	LastSyncType       string     `json:"lastSyncType,omitempty" db:"last_sync_type"`
-	PendingCount       int        `json:"pendingCount" db:"pending_count"`
-	SyncedCount        int        `json:"syncedCount" db:"synced_count"`
-	Status             string     `json:"status" db:"status"`
-	ErrorMessage       string     `json:"errorMessage,omitempty" db:"error_message"`
-	ConflictsResolved  int        `json:"conflictsResolved" db:"conflicts_resolved"`
-	CreatedAt          time.Time  `json:"createdAt" db:"created_at"`
-	UpdatedAt          time.Time  `json:"updatedAt" db:"updated_at"`
+	ID                uuid.UUID  `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	UserID            uuid.UUID  `json:"userId" gorm:"type:uuid;column:user_id;not null;index"`
+	DeviceID          string     `json:"deviceId" gorm:"column:device_id;not null"`
+	DeviceName        string     `json:"deviceName" gorm:"column:device_name"`
+	LastSyncTime      *time.Time `json:"lastSyncTime,omitempty" gorm:"column:last_sync_time"`
+	LastSyncType      string     `json:"lastSyncType,omitempty" gorm:"column:last_sync_type"`
+	PendingCount      int        `json:"pendingCount" gorm:"column:pending_count;default:0"`
+	SyncedCount       int        `json:"syncedCount" gorm:"column:synced_count;default:0"`
+	Status            string     `json:"status" gorm:"default:'pending'"`
+	ErrorMessage      string     `json:"errorMessage,omitempty" gorm:"column:error_message;type:text"`
+	ConflictsResolved int        `json:"conflictsResolved" gorm:"column:conflicts_resolved;default:0"`
+	CreatedAt         time.Time  `json:"createdAt" gorm:"autoCreateTime"`
+	UpdatedAt         time.Time  `json:"updatedAt" gorm:"autoUpdateTime"`
 }
 
 type Device struct {
-	ID           uuid.UUID  `json:"id" db:"id"`
-	UserID       uuid.UUID  `json:"userId" db:"user_id"`
-	DeviceID     string     `json:"deviceId" db:"device_id" binding:"required"`
-	DeviceName   string     `json:"deviceName" db:"device_name" binding:"required"`
-	RegisteredAt time.Time  `json:"registeredAt" db:"registered_at"`
-	LastSyncAt   *time.Time `json:"lastSyncAt,omitempty" db:"last_sync_at"`
-	CreatedAt    time.Time  `json:"createdAt" db:"created_at"`
-	UpdatedAt    time.Time  `json:"updatedAt" db:"updated_at"`
+	ID           uuid.UUID  `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	UserID       uuid.UUID  `json:"userId" gorm:"type:uuid;column:user_id;not null;index"`
+	DeviceID     string     `json:"deviceId" gorm:"column:device_id;uniqueIndex;not null" binding:"required"`
+	DeviceName   string     `json:"deviceName" gorm:"column:device_name;not null" binding:"required"`
+	RegisteredAt time.Time  `json:"registeredAt" gorm:"column:registered_at"`
+	LastSyncAt   *time.Time `json:"lastSyncAt,omitempty" gorm:"column:last_sync_at"`
+	CreatedAt    time.Time  `json:"createdAt" gorm:"autoCreateTime"`
+	UpdatedAt    time.Time  `json:"updatedAt" gorm:"autoUpdateTime"`
 }
 
 type RegisterDeviceRequest struct {

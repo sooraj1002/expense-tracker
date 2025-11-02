@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,6 +12,7 @@ import (
 	"github.com/sooraj1002/expense-tracker/db"
 	"github.com/sooraj1002/expense-tracker/logger"
 	"github.com/sooraj1002/expense-tracker/models"
+	"gorm.io/gorm"
 )
 
 // GetExpenses retrieves expenses with filters and pagination
@@ -36,52 +37,29 @@ func GetExpenses(c *gin.Context) {
 	}
 	offset := (page - 1) * limit
 
-	query := `SELECT id, user_id, amount, category_id, account_id, date, description, source, merchant_id, merchant_name, location_id, raw_data, verified, created_at, updated_at
-		FROM expenses WHERE user_id = $1`
-	args := []interface{}{userID}
-	argCount := 1
+	query := db.DB.Where("user_id = ?", userID)
 
 	if year > 0 {
-		argCount++
-		query += " AND EXTRACT(YEAR FROM date) = $" + strconv.Itoa(argCount)
-		args = append(args, year)
+		query = query.Where("EXTRACT(YEAR FROM date) = ?", year)
 	}
 	if month > 0 && month <= 12 {
-		argCount++
-		query += " AND EXTRACT(MONTH FROM date) = $" + strconv.Itoa(argCount)
-		args = append(args, month)
+		query = query.Where("EXTRACT(MONTH FROM date) = ?", month)
 	}
 	if accountIDStr != "" {
 		if accountID, err := uuid.Parse(accountIDStr); err == nil {
-			argCount++
-			query += " AND account_id = $" + strconv.Itoa(argCount)
-			args = append(args, accountID)
+			query = query.Where("account_id = ?", accountID)
 		}
 	}
 
-	query += " ORDER BY date DESC"
-	argCount++
-	query += " LIMIT $" + strconv.Itoa(argCount)
-	args = append(args, limit)
-	argCount++
-	query += " OFFSET $" + strconv.Itoa(argCount)
-	args = append(args, offset)
-
-	rows, err := db.DB.Query(query, args...)
+	expenses := []models.Expense{}
+	err = query.Order("date DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&expenses).Error
 	if err != nil {
 		logger.Log.Errorw("Failed to get expenses", "error", err)
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(models.ErrCodeDatabaseError, "Failed to retrieve expenses"))
 		return
-	}
-	defer rows.Close()
-
-	expenses := []models.Expense{}
-	for rows.Next() {
-		var exp models.Expense
-		err := rows.Scan(&exp.ID, &exp.UserID, &exp.Amount, &exp.CategoryID, &exp.AccountID, &exp.Date, &exp.Description, &exp.Source, &exp.MerchantID, &exp.MerchantName, &exp.LocationID, &exp.RawData, &exp.Verified, &exp.CreatedAt, &exp.UpdatedAt)
-		if err == nil {
-			expenses = append(expenses, exp)
-		}
 	}
 
 	c.JSON(http.StatusOK, models.NewSuccessResponse(expenses))
@@ -102,44 +80,52 @@ func CreateExpense(c *gin.Context) {
 	}
 
 	// Start transaction
-	tx, err := db.DB.Begin()
-	if err != nil {
-		logger.Log.Errorw("Failed to begin transaction", "error", err)
-		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(models.ErrCodeDatabaseError, "Failed to create expense"))
-		return
-	}
-	defer tx.Rollback()
+	err = db.DB.Transaction(func(tx *gorm.DB) error {
+		// Create expense
+		expense := models.Expense{
+			UserID:       userID,
+			Amount:       req.Amount,
+			CategoryID:   req.CategoryID,
+			AccountID:    req.AccountID,
+			Date:         req.Date,
+			Description:  req.Description,
+			Source:       "manual",
+			MerchantName: req.MerchantName,
+			Verified:     true,
+		}
 
-	// Create expense
-	var expense models.Expense
-	now := time.Now()
-	err = tx.QueryRow(`
-		INSERT INTO expenses (user_id, amount, category_id, account_id, date, description, source, merchant_name, verified, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		RETURNING id, user_id, amount, category_id, account_id, date, description, source, merchant_id, merchant_name, location_id, raw_data, verified, created_at, updated_at
-	`, userID, req.Amount, req.CategoryID, req.AccountID, req.Date, req.Description, "manual", req.MerchantName, true, now, now).Scan(
-		&expense.ID, &expense.UserID, &expense.Amount, &expense.CategoryID, &expense.AccountID, &expense.Date, &expense.Description, &expense.Source, &expense.MerchantID, &expense.MerchantName, &expense.LocationID, &expense.RawData, &expense.Verified, &expense.CreatedAt, &expense.UpdatedAt,
-	)
+		if err := tx.Create(&expense).Error; err != nil {
+			return err
+		}
+
+		// Update account balance
+		now := time.Now()
+		err := tx.Model(&models.Account{}).
+			Where("id = ? AND user_id = ?", req.AccountID, userID).
+			Updates(map[string]interface{}{
+				"current_balance": gorm.Expr("current_balance - ?", req.Amount),
+				"total_spent":     gorm.Expr("total_spent + ?", req.Amount),
+				"updated_at":      now,
+			}).Error
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
 	if err != nil {
 		logger.Log.Errorw("Failed to create expense", "error", err)
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(models.ErrCodeDatabaseError, "Failed to create expense"))
 		return
 	}
 
-	// Update account balance
-	_, err = tx.Exec(`
-		UPDATE accounts
-		SET current_balance = current_balance - $1, total_spent = total_spent + $1, updated_at = $2
-		WHERE id = $3 AND user_id = $4
-	`, req.Amount, now, req.AccountID, userID)
+	// Retrieve the created expense
+	var expense models.Expense
+	err = db.DB.Where("user_id = ? AND account_id = ?", userID, req.AccountID).
+		Order("created_at DESC").
+		First(&expense).Error
 	if err != nil {
-		logger.Log.Errorw("Failed to update account balance", "error", err)
-		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(models.ErrCodeDatabaseError, "Failed to create expense"))
-		return
-	}
-
-	if err = tx.Commit(); err != nil {
-		logger.Log.Errorw("Failed to commit transaction", "error", err)
+		logger.Log.Errorw("Failed to retrieve created expense", "error", err)
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(models.ErrCodeDatabaseError, "Failed to create expense"))
 		return
 	}
@@ -170,8 +156,8 @@ func UpdateExpense(c *gin.Context) {
 
 	// Get existing expense
 	var oldExpense models.Expense
-	err = db.DB.QueryRow("SELECT user_id, amount, account_id FROM expenses WHERE id = $1", expenseID).Scan(&oldExpense.UserID, &oldExpense.Amount, &oldExpense.AccountID)
-	if err == sql.ErrNoRows {
+	err = db.DB.Where("id = ?", expenseID).First(&oldExpense).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusNotFound, models.NewErrorResponse(models.ErrCodeNotFound, "Expense not found"))
 		return
 	}
@@ -186,30 +172,20 @@ func UpdateExpense(c *gin.Context) {
 		return
 	}
 
-	// Build update query dynamically
-	updates := []string{}
-	args := []interface{}{}
-	argCount := 0
+	// Build updates map dynamically
+	updates := make(map[string]interface{})
 
 	if req.Amount != nil {
-		argCount++
-		updates = append(updates, "amount = $"+strconv.Itoa(argCount))
-		args = append(args, *req.Amount)
+		updates["amount"] = *req.Amount
 	}
 	if req.CategoryID != nil {
-		argCount++
-		updates = append(updates, "category_id = $"+strconv.Itoa(argCount))
-		args = append(args, *req.CategoryID)
+		updates["category_id"] = *req.CategoryID
 	}
 	if req.Description != nil {
-		argCount++
-		updates = append(updates, "description = $"+strconv.Itoa(argCount))
-		args = append(args, *req.Description)
+		updates["description"] = *req.Description
 	}
 	if req.Verified != nil {
-		argCount++
-		updates = append(updates, "verified = $"+strconv.Itoa(argCount))
-		args = append(args, *req.Verified)
+		updates["verified"] = *req.Verified
 	}
 
 	if len(updates) == 0 {
@@ -217,20 +193,11 @@ func UpdateExpense(c *gin.Context) {
 		return
 	}
 
-	argCount++
-	updates = append(updates, "updated_at = $"+strconv.Itoa(argCount))
-	args = append(args, time.Now())
+	updates["updated_at"] = time.Now()
 
-	argCount++
-	args = append(args, expenseID)
-
-	query := "UPDATE expenses SET " + updates[0]
-	for i := 1; i < len(updates); i++ {
-		query += ", " + updates[i]
-	}
-	query += " WHERE id = $" + strconv.Itoa(argCount)
-
-	_, err = db.DB.Exec(query, args...)
+	err = db.DB.Model(&models.Expense{}).
+		Where("id = ?", expenseID).
+		Updates(updates).Error
 	if err != nil {
 		logger.Log.Errorw("Failed to update expense", "error", err)
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(models.ErrCodeDatabaseError, "Failed to update expense"))
@@ -239,9 +206,7 @@ func UpdateExpense(c *gin.Context) {
 
 	// Get updated expense
 	var expense models.Expense
-	err = db.DB.QueryRow("SELECT id, user_id, amount, category_id, account_id, date, description, source, merchant_id, merchant_name, location_id, raw_data, verified, created_at, updated_at FROM expenses WHERE id = $1", expenseID).Scan(
-		&expense.ID, &expense.UserID, &expense.Amount, &expense.CategoryID, &expense.AccountID, &expense.Date, &expense.Description, &expense.Source, &expense.MerchantID, &expense.MerchantName, &expense.LocationID, &expense.RawData, &expense.Verified, &expense.CreatedAt, &expense.UpdatedAt,
-	)
+	err = db.DB.Where("id = ?", expenseID).First(&expense).Error
 	if err != nil {
 		logger.Log.Errorw("Failed to get updated expense", "error", err)
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(models.ErrCodeDatabaseError, "Failed to update expense"))
@@ -268,8 +233,8 @@ func DeleteExpense(c *gin.Context) {
 
 	// Get expense details
 	var expense models.Expense
-	err = db.DB.QueryRow("SELECT user_id, amount, account_id FROM expenses WHERE id = $1", expenseID).Scan(&expense.UserID, &expense.Amount, &expense.AccountID)
-	if err == sql.ErrNoRows {
+	err = db.DB.Where("id = ?", expenseID).First(&expense).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusNotFound, models.NewErrorResponse(models.ErrCodeNotFound, "Expense not found"))
 		return
 	}
@@ -285,36 +250,29 @@ func DeleteExpense(c *gin.Context) {
 	}
 
 	// Start transaction
-	tx, err := db.DB.Begin()
-	if err != nil {
-		logger.Log.Errorw("Failed to begin transaction", "error", err)
-		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(models.ErrCodeDatabaseError, "Failed to delete expense"))
-		return
-	}
-	defer tx.Rollback()
+	err = db.DB.Transaction(func(tx *gorm.DB) error {
+		// Delete expense
+		if err := tx.Delete(&expense).Error; err != nil {
+			return err
+		}
 
-	// Delete expense
-	_, err = tx.Exec("DELETE FROM expenses WHERE id = $1", expenseID)
+		// Update account balance
+		now := time.Now()
+		err := tx.Model(&models.Account{}).
+			Where("id = ? AND user_id = ?", expense.AccountID, userID).
+			Updates(map[string]interface{}{
+				"current_balance": gorm.Expr("current_balance + ?", expense.Amount),
+				"total_spent":     gorm.Expr("total_spent - ?", expense.Amount),
+				"updated_at":      now,
+			}).Error
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
 	if err != nil {
 		logger.Log.Errorw("Failed to delete expense", "error", err)
-		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(models.ErrCodeDatabaseError, "Failed to delete expense"))
-		return
-	}
-
-	// Update account balance
-	_, err = tx.Exec(`
-		UPDATE accounts
-		SET current_balance = current_balance + $1, total_spent = total_spent - $1, updated_at = $2
-		WHERE id = $3 AND user_id = $4
-	`, expense.Amount, time.Now(), expense.AccountID, userID)
-	if err != nil {
-		logger.Log.Errorw("Failed to update account balance", "error", err)
-		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(models.ErrCodeDatabaseError, "Failed to delete expense"))
-		return
-	}
-
-	if err = tx.Commit(); err != nil {
-		logger.Log.Errorw("Failed to commit transaction", "error", err)
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(models.ErrCodeDatabaseError, "Failed to delete expense"))
 		return
 	}

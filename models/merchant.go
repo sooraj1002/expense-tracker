@@ -8,15 +8,15 @@ import (
 )
 
 type MerchantInfo struct {
-	ID               uuid.UUID      `json:"id" db:"id"`
-	UserID           uuid.UUID      `json:"userId" db:"user_id"`
-	Name             string         `json:"name" db:"name" binding:"required"`
-	Aliases          pq.StringArray `json:"aliases" db:"aliases"`
-	CommonCategoryID *uuid.UUID     `json:"commonCategoryId,omitempty" db:"common_category_id"`
-	TransactionCount int            `json:"transactionCount" db:"transaction_count"`
-	TotalSpent       float64        `json:"totalSpent" db:"total_spent"`
-	CreatedAt        time.Time      `json:"createdAt" db:"created_at"`
-	UpdatedAt        time.Time      `json:"updatedAt" db:"updated_at"`
+	ID               uuid.UUID      `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	UserID           uuid.UUID      `json:"userId" gorm:"type:uuid;column:user_id;not null;index"`
+	Name             string         `json:"name" gorm:"not null" binding:"required"`
+	Aliases          pq.StringArray `json:"aliases" gorm:"type:text[]"`
+	CommonCategoryID *uuid.UUID     `json:"commonCategoryId,omitempty" gorm:"type:uuid;column:common_category_id"`
+	TransactionCount int            `json:"transactionCount" gorm:"column:transaction_count;default:0"`
+	TotalSpent       float64        `json:"totalSpent" gorm:"column:total_spent;type:decimal(15,2);default:0"`
+	CreatedAt        time.Time      `json:"createdAt" gorm:"autoCreateTime"`
+	UpdatedAt        time.Time      `json:"updatedAt" gorm:"autoUpdateTime"`
 }
 
 type CreateMerchantRequest struct {

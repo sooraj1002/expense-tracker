@@ -7,14 +7,14 @@ import (
 )
 
 type Account struct {
-	ID             uuid.UUID `json:"id" db:"id"`
-	UserID         uuid.UUID `json:"userId" db:"user_id"`
-	Name           string    `json:"name" db:"name" binding:"required"`
-	InitialBalance float64   `json:"initialBalance" db:"initial_balance"`
-	CurrentBalance float64   `json:"currentBalance" db:"current_balance"`
-	TotalSpent     float64   `json:"totalSpent" db:"total_spent"`
-	CreatedAt      time.Time `json:"createdAt" db:"created_at"`
-	UpdatedAt      time.Time `json:"updatedAt" db:"updated_at"`
+	ID             uuid.UUID `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	UserID         uuid.UUID `json:"userId" gorm:"type:uuid;column:user_id;not null;index"`
+	Name           string    `json:"name" gorm:"not null" binding:"required"`
+	InitialBalance float64   `json:"initialBalance" gorm:"column:initial_balance;type:decimal(15,2);default:0"`
+	CurrentBalance float64   `json:"currentBalance" gorm:"column:current_balance;type:decimal(15,2);default:0"`
+	TotalSpent     float64   `json:"totalSpent" gorm:"column:total_spent;type:decimal(15,2);default:0"`
+	CreatedAt      time.Time `json:"createdAt" gorm:"autoCreateTime"`
+	UpdatedAt      time.Time `json:"updatedAt" gorm:"autoUpdateTime"`
 }
 
 type CreateAccountRequest struct {

@@ -1,43 +1,105 @@
 package db
 
 import (
-	"database/sql"
 	"fmt"
 	"time"
 
-	_ "github.com/lib/pq"
 	"github.com/sooraj1002/expense-tracker/logger"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
-var DB *sql.DB
+var DB *gorm.DB
 
-// InitDB initializes the PostgreSQL database connection
-func InitDB(dsn string) (*sql.DB, error) {
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+// InitDB initializes the PostgreSQL database connection using GORM
+func InitDB(host string, port int, user, password, dbName, sslMode string) (*gorm.DB, error) {
+	// Build the DSN for the target database
+	dsn := fmt.Sprintf(
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		host, port, user, password, dbName, sslMode,
+	)
+
+	logger.Log.Infof("Connecting to database: %s", dbName)
+
+	// Configure GORM
+	config := &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Info),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
 	}
 
-	// Test the connection
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
+	// Connect to database
+	db, err := gorm.Open(postgres.Open(dsn), config)
+	if err != nil {
+		// If connection fails, try to create the database
+		logger.Log.Warnf("Failed to connect to %s, attempting to create database...", dbName)
+
+		// Connect to postgres database to create the target database
+		postgresDSN := fmt.Sprintf(
+			"host=%s port=%d user=%s password=%s dbname=postgres sslmode=%s",
+			host, port, user, password, sslMode,
+		)
+
+		postgresDB, err := gorm.Open(postgres.Open(postgresDSN), config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to postgres database: %w", err)
+		}
+
+		// Get the underlying SQL DB to execute raw SQL
+		sqlDB, err := postgresDB.DB()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get database instance: %w", err)
+		}
+		defer sqlDB.Close()
+
+		// Create the database
+		createSQL := fmt.Sprintf("CREATE DATABASE %s", dbName)
+		if err := postgresDB.Exec(createSQL).Error; err != nil {
+			return nil, fmt.Errorf("failed to create database: %w", err)
+		}
+
+		logger.Log.Infof("Database '%s' created successfully", dbName)
+
+		// Now connect to the newly created database
+		db, err = gorm.Open(postgres.Open(dsn), config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to newly created database: %w", err)
+		}
+	}
+
+	// Get underlying SQL DB to configure connection pool
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database instance: %w", err)
 	}
 
 	// Set connection pool settings
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+
+	// Verify connection
+	var dbNameCheck string
+	if err := db.Raw("SELECT current_database()").Scan(&dbNameCheck).Error; err != nil {
+		return nil, fmt.Errorf("failed to verify database connection: %w", err)
+	}
+
+	logger.Log.Infof("Successfully connected to database: %s", dbNameCheck)
 
 	DB = db
-	logger.Log.Info("Database connection established successfully")
-
 	return db, nil
 }
 
 // Close closes the database connection
 func Close() error {
 	if DB != nil {
-		return DB.Close()
+		sqlDB, err := DB.DB()
+		if err != nil {
+			return err
+		}
+		return sqlDB.Close()
 	}
 	return nil
 }

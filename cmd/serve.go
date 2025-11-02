@@ -31,17 +31,28 @@ var serveCmd = &cobra.Command{
 		)
 
 		// Initialize database
-		dsn := config.AppConfig.GetDatabaseDSN()
-		logger.Log.Infow("Connecting to database", "dsn", dsn)
-		dbConn, err := db.InitDB(dsn)
+		dbConfig := config.AppConfig.Database
+		logger.Log.Infow("Connecting to database",
+			"host", dbConfig.Host,
+			"port", dbConfig.Port,
+			"user", dbConfig.User,
+			"dbname", dbConfig.DBName,
+		)
+		_, err := db.InitDB(
+			dbConfig.Host,
+			dbConfig.Port,
+			dbConfig.User,
+			dbConfig.Password,
+			dbConfig.DBName,
+			dbConfig.SSLMode,
+		)
 		if err != nil {
 			logger.Log.Fatalw("Failed to initialize database", "error", err)
 		}
 		defer db.Close()
 
 		// Run migrations
-		logger.Log.Info("Running database migrations...")
-		if err := db.RunMigrations(dbConn, "db/migrations"); err != nil {
+		if err := db.RunMigrations(); err != nil {
 			logger.Log.Fatalw("Failed to run migrations", "error", err)
 		}
 
