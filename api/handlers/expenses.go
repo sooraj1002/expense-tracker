@@ -157,8 +157,8 @@ func GetExpenses(c *gin.Context) {
 	// Execute query with pagination
 	var expensesWithCategories []ExpenseWithCategory
 	orderClause := "expenses.date DESC"
-	if sortOption == "recent" {
-		orderClause = "expenses.created_at DESC"
+	if sortOption == "updated" {
+		orderClause = "expenses.updated_at DESC"
 	}
 
 	err = query.Order(orderClause).
