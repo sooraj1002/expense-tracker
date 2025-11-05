@@ -44,6 +44,7 @@ func GetExpenses(c *gin.Context) {
 	endDateStr := c.Query("endDate")
 	page, _ := strconv.Atoi(c.Query("page"))
 	limit, _ := strconv.Atoi(c.Query("limit"))
+	sortOption := c.DefaultQuery("sort", "date")
 
 	if page < 1 {
 		page = 1
@@ -155,7 +156,12 @@ func GetExpenses(c *gin.Context) {
 
 	// Execute query with pagination
 	var expensesWithCategories []ExpenseWithCategory
-	err = query.Order("expenses.date DESC").
+	orderClause := "expenses.date DESC"
+	if sortOption == "recent" {
+		orderClause = "expenses.created_at DESC"
+	}
+
+	err = query.Order(orderClause).
 		Limit(limit).
 		Offset(offset).
 		Scan(&expensesWithCategories).Error
