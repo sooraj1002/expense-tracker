@@ -144,6 +144,15 @@ func GetExpenses(c *gin.Context) {
 		return
 	}
 
+	// Calculate total amount for filtered results
+	var totalAmount float64
+	sumQuery := query
+	if err := sumQuery.Select("COALESCE(SUM(expenses.amount), 0)").Row().Scan(&totalAmount); err != nil {
+		logger.Log.Errorw("Failed to calculate total amount", "error", err)
+		// Continue without failing the request
+		totalAmount = 0
+	}
+
 	// Execute query with pagination
 	var expensesWithCategories []ExpenseWithCategory
 	err = query.Order("expenses.date DESC").
@@ -201,10 +210,11 @@ func GetExpenses(c *gin.Context) {
 		Success: true,
 		Data:    expenseResponses,
 		Pagination: &models.PaginationMetadata{
-			Page:       page,
-			Limit:      limit,
-			TotalCount: int(totalCount),
-			TotalPages: totalPages,
+			Page:        page,
+			Limit:       limit,
+			TotalCount:  int(totalCount),
+			TotalPages:  totalPages,
+			TotalAmount: totalAmount,
 		},
 	}
 

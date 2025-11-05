@@ -92,10 +92,11 @@ type ExpenseListResponse struct {
 
 // PaginationMetadata contains pagination information
 type PaginationMetadata struct {
-	Page       int `json:"page"`
-	Limit      int `json:"limit"`
-	TotalCount int `json:"totalCount"`
-	TotalPages int `json:"totalPages"`
+	Page        int     `json:"page"`
+	Limit       int     `json:"limit"`
+	TotalCount  int     `json:"totalCount"`
+	TotalPages  int     `json:"totalPages"`
+	TotalAmount float64 `json:"totalAmount"` // Total amount for filtered results
 }
 
 type PeriodSummary struct {
