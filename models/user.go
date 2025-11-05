@@ -36,3 +36,8 @@ type LoginResponse struct {
 	User  User   `json:"user"`
 	Token string `json:"token"`
 }
+
+type AdminChangePasswordRequest struct {
+	Email       string `json:"email" binding:"required,email"`
+	NewPassword string `json:"newPassword" binding:"required,min=8"`
+}

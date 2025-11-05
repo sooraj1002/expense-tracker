@@ -91,6 +91,64 @@ func Register(c *gin.Context) {
 	}))
 }
 
+// AdminChangePassword handles admin password changes without JWT authentication
+func AdminChangePassword(c *gin.Context) {
+	var req models.AdminChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+			models.ErrCodeInvalidInput,
+			err.Error(),
+		))
+		return
+	}
+
+	// Find user by email
+	var user models.User
+	if err := db.DB.Where("email = ?", req.Email).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, models.NewErrorResponse(
+				models.ErrCodeNotFound,
+				"User not found",
+			))
+			return
+		}
+		logger.Log.Errorw("Failed to fetch user", "error", err, "email", req.Email)
+		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+			models.ErrCodeDatabaseError,
+			"Failed to fetch user",
+		))
+		return
+	}
+
+	// Hash new password
+	newPasswordHash, err := utils.HashPassword(req.NewPassword)
+	if err != nil {
+		logger.Log.Errorw("Failed to hash new password", "error", err)
+		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+			models.ErrCodeInternalError,
+			"Failed to update password",
+		))
+		return
+	}
+
+	// Update password
+	if err := db.DB.Model(&user).Update("password_hash", newPasswordHash).Error; err != nil {
+		logger.Log.Errorw("Failed to update password", "error", err, "userId", user.ID)
+		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+			models.ErrCodeDatabaseError,
+			"Failed to update password",
+		))
+		return
+	}
+
+	logger.Log.Infow("Password changed successfully by admin", "userId", user.ID, "email", user.Email)
+
+	c.JSON(http.StatusOK, models.NewSuccessResponse(gin.H{
+		"message": "Password changed successfully",
+		"email":   user.Email,
+	}))
+}
+
 // Login handles user login
 func Login(c *gin.Context) {
 	var req models.LoginRequest

@@ -37,6 +37,12 @@ func SetupRouter() *gin.Engine {
 			auth.POST("/refresh", handlers.RefreshToken)
 		}
 
+		// Admin endpoints (no JWT required - use with caution!)
+		admin := v1.Group("/admin")
+		{
+			admin.POST("/change-password", handlers.AdminChangePassword)
+		}
+
 		// Protected routes (require authentication)
 		protected := v1.Group("")
 		protected.Use(middleware.AuthMiddleware())
@@ -61,6 +67,7 @@ func SetupRouter() *gin.Engine {
 
 			// Expenses
 			protected.GET("/expenses", handlers.GetExpenses)
+			protected.GET("/expenses/tags", handlers.GetExpenseTags)
 			protected.POST("/expenses", handlers.CreateExpense)
 			protected.PUT("/expenses/:id", handlers.UpdateExpense)
 			protected.DELETE("/expenses/:id", handlers.DeleteExpense)
