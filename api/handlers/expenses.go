@@ -137,8 +137,7 @@ func GetExpenses(c *gin.Context) {
 
 	// Get total count for pagination
 	var totalCount int64
-	countQuery := query
-	if err := countQuery.Count(&totalCount).Error; err != nil {
+	if err := query.Session(&gorm.Session{}).Count(&totalCount).Error; err != nil {
 		logger.Log.Errorw("Failed to count expenses", "error", err)
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(models.ErrCodeDatabaseError, "Failed to retrieve expenses"))
 		return
@@ -146,8 +145,8 @@ func GetExpenses(c *gin.Context) {
 
 	// Calculate total amount for filtered results
 	var totalAmount float64
-	sumQuery := query
-	if err := sumQuery.Select("COALESCE(SUM(expenses.amount), 0)").Row().Scan(&totalAmount); err != nil {
+	err = query.Session(&gorm.Session{}).Select("COALESCE(SUM(expenses.amount), 0)").Row().Scan(&totalAmount)
+	if err != nil {
 		logger.Log.Errorw("Failed to calculate total amount", "error", err)
 		// Continue without failing the request
 		totalAmount = 0
