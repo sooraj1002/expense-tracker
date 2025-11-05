@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/sooraj1002/expense-tracker/api/middleware"
 	"github.com/sooraj1002/expense-tracker/db"
 	"github.com/sooraj1002/expense-tracker/logger"
@@ -130,8 +131,8 @@ func GetExpenses(c *gin.Context) {
 			}
 		}
 		if len(tags) > 0 {
-			// Use PostgreSQL array overlap operator
-			query = query.Where("expenses.tags && ?", tags)
+			// Use PostgreSQL array overlap operator with pq.Array for proper array conversion
+			query = query.Where("expenses.tags && ?", pq.Array(tags))
 		}
 	}
 
