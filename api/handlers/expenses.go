@@ -430,6 +430,12 @@ func UpdateExpense(c *gin.Context) {
 	if req.CategoryID != nil {
 		updates["category_id"] = *req.CategoryID
 	}
+	if req.AccountID != nil {
+		updates["account_id"] = *req.AccountID
+	}
+	if req.Date != nil {
+		updates["date"] = *req.Date
+	}
 	if req.Description != nil {
 		updates["description"] = *req.Description
 	}
