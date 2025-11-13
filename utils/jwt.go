@@ -53,7 +53,18 @@ func ValidateToken(tokenString string, secret string) (*Claims, error) {
 	})
 
 	if err != nil {
+		var claims *Claims
+		if token != nil {
+			if c, ok := token.Claims.(*Claims); ok {
+				claims = c
+			}
+		}
+
 		if errors.Is(err, jwt.ErrTokenExpired) {
+			// Surface claims so callers can re-issue a token even when expired.
+			if claims != nil {
+				return claims, ErrExpiredToken
+			}
 			return nil, ErrExpiredToken
 		}
 		return nil, fmt.Errorf("failed to parse token: %w", err)
