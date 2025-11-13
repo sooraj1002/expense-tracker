@@ -1,0 +1,29 @@
+# Build artifacts and dependencies
+bin
+build
+dist
+
+# Git and CI
+.git
+.gitignore
+.github
+
+# Local environment & secrets
+.env
+.env.local
+.env.*
+!*.example
+
+# OS / editor files
+*.log
+*.out
+*.tmp
+*.swp
+.DS_Store
+
+# Dependency caches
+vendor
+
+# Project specific
+server.log
+progress

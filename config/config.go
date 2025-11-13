@@ -2,8 +2,10 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -70,6 +72,14 @@ func LoadConfig() error {
 		},
 	}
 
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		parsed, err := parseDatabaseURL(dbURL)
+		if err != nil {
+			return fmt.Errorf("invalid DATABASE_URL: %w", err)
+		}
+		AppConfig.Database = parsed
+	}
+
 	return nil
 }
 
@@ -93,4 +103,41 @@ func getEnv(key, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+func parseDatabaseURL(rawURL string) (DatabaseConfig, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return DatabaseConfig{}, err
+	}
+
+	portStr := u.Port()
+	if portStr == "" {
+		portStr = "5432"
+	}
+
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return DatabaseConfig{}, fmt.Errorf("invalid port in DATABASE_URL: %w", err)
+	}
+
+	password, _ := u.User.Password()
+	dbName := strings.TrimPrefix(u.Path, "/")
+	if dbName == "" {
+		dbName = "postgres"
+	}
+
+	sslMode := u.Query().Get("sslmode")
+	if sslMode == "" {
+		sslMode = "require"
+	}
+
+	return DatabaseConfig{
+		Host:     u.Hostname(),
+		Port:     port,
+		User:     u.User.Username(),
+		Password: password,
+		DBName:   dbName,
+		SSLMode:  sslMode,
+	}, nil
 }

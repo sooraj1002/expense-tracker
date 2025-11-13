@@ -46,6 +46,26 @@ go run main.go serve
 
 Server starts at `http://localhost:8080`
 
+## Docker & Railway
+
+### Local Docker Compose
+1. Copy the environment template: `cp .env.example .env`
+2. Adjust the values if needed (the compose file overrides only `DB_HOST`, `DB_PORT`, and `DB_SSLMODE`)
+3. Start the stack:
+   ```bash
+   docker compose up --build
+   ```
+   The API will be available at http://localhost:8080 once the database health check passes.
+
+### Railway Deployment
+- Add a new Railway service pointing to this repository and choose the provided `Dockerfile`
+- Provision a Railway PostgreSQL add-on; the platform automatically injects `DATABASE_URL`
+- Define the remaining secrets (`JWT_SECRET`, `JWT_EXPIRY`, optional `LOG_LEVEL`, etc.). Railway sets `PORT` for you
+- Deploy; the container runs `expense-tracker serve`, auto-migrating the database during startup
+
+When `DATABASE_URL` is present it takes precedence over the individual `DB_*` variables, making it compatible
+with managed Railway databases out of the box.
+
 ## API Endpoints
 
 ### Authentication
