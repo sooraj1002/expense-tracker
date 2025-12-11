@@ -41,6 +41,8 @@ func SetupRouter() *gin.Engine {
 		admin := v1.Group("/admin")
 		{
 			admin.POST("/change-password", handlers.AdminChangePassword)
+			admin.POST("/migrate-tags", handlers.MigrateTags)
+			admin.GET("/export", handlers.ExportDatabase)
 		}
 
 		// Protected routes (require authentication)
@@ -68,6 +70,7 @@ func SetupRouter() *gin.Engine {
 			// Expenses
 			protected.GET("/expenses", handlers.GetExpenses)
 			protected.GET("/expenses/tags", handlers.GetExpenseTags)
+			protected.GET("/expenses/export", handlers.ExportExpensesCSV)
 			protected.POST("/expenses", handlers.CreateExpense)
 			protected.PUT("/expenses/:id", handlers.UpdateExpense)
 			protected.DELETE("/expenses/:id", handlers.DeleteExpense)

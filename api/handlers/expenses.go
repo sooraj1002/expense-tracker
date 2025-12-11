@@ -1,10 +1,11 @@
 package handlers
 
 import (
+	"encoding/csv"
 	"errors"
 	"net/http"
-	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +16,7 @@ import (
 	"github.com/sooraj1002/expense-tracker/logger"
 	"github.com/sooraj1002/expense-tracker/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ExpenseWithCategory is a helper struct for joining expenses with categories
@@ -25,15 +27,13 @@ type ExpenseWithCategory struct {
 	IsDefault     bool   `gorm:"column:category_is_default"`
 }
 
-// GetExpenses retrieves expenses with filters and pagination
-func GetExpenses(c *gin.Context) {
-	userID, err := middleware.GetUserID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, models.NewErrorResponse(models.ErrCodeUnauthorized, "User not authenticated"))
-		return
-	}
+type expenseQueryOptions struct {
+	Page        int
+	Limit       int
+	OrderClause string
+}
 
-	// Parse filter parameters
+func buildExpenseQuery(c *gin.Context, userID uuid.UUID) (*gorm.DB, expenseQueryOptions, error) {
 	month, _ := strconv.Atoi(c.Query("month"))
 	year, _ := strconv.Atoi(c.Query("year"))
 	accountIDStr := c.Query("accountId")
@@ -52,9 +52,16 @@ func GetExpenses(c *gin.Context) {
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	offset := (page - 1) * limit
 
-	// Build base query with JOIN on categories table
+	opts := expenseQueryOptions{
+		Page:        page,
+		Limit:       limit,
+		OrderClause: "expenses.date DESC",
+	}
+	if sortOption == "updated" {
+		opts.OrderClause = "expenses.updated_at DESC"
+	}
+
 	query := db.DB.Table("expenses").
 		Select(`expenses.*,
 			categories.name as category_name,
@@ -72,10 +79,9 @@ func GetExpenses(c *gin.Context) {
 			startDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 			query = query.Where("expenses.date >= ?", startDate)
 		case "week":
-			// Start of week (Monday)
 			weekday := int(now.Weekday())
 			if weekday == 0 {
-				weekday = 7 // Sunday
+				weekday = 7
 			}
 			startDate = now.AddDate(0, 0, -(weekday - 1))
 			startDate = time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, startDate.Location())
@@ -88,7 +94,6 @@ func GetExpenses(c *gin.Context) {
 			query = query.Where("expenses.date >= ?", startDate)
 		}
 	} else if startDateStr != "" || endDateStr != "" {
-		// Custom date range
 		if startDateStr != "" {
 			if startDate, err := time.Parse("2006-01-02", startDateStr); err == nil {
 				query = query.Where("expenses.date >= ?", startDate)
@@ -96,34 +101,33 @@ func GetExpenses(c *gin.Context) {
 		}
 		if endDateStr != "" {
 			if endDate, err := time.Parse("2006-01-02", endDateStr); err == nil {
-				// Add one day to include the end date
 				endDate = endDate.AddDate(0, 0, 1)
 				query = query.Where("expenses.date < ?", endDate)
 			}
 		}
 	} else if year > 0 {
-		// Legacy month/year filtering
 		query = query.Where("EXTRACT(YEAR FROM expenses.date) = ?", year)
 		if month > 0 && month <= 12 {
 			query = query.Where("EXTRACT(MONTH FROM expenses.date) = ?", month)
 		}
 	}
 
-	// Account filter
 	if accountIDStr != "" {
 		if accountID, err := uuid.Parse(accountIDStr); err == nil {
 			query = query.Where("expenses.account_id = ?", accountID)
+		} else {
+			return nil, opts, err
 		}
 	}
 
-	// Category filter
 	if categoryIDStr != "" {
 		if categoryID, err := uuid.Parse(categoryIDStr); err == nil {
 			query = query.Where("expenses.category_id = ?", categoryID)
+		} else {
+			return nil, opts, err
 		}
 	}
 
-	// Tags filter (supports comma-separated tags)
 	if tagsParam != "" {
 		tags := []string{}
 		for _, tag := range parseCommaSeparated(tagsParam) {
@@ -132,9 +136,25 @@ func GetExpenses(c *gin.Context) {
 			}
 		}
 		if len(tags) > 0 {
-			// Use PostgreSQL array overlap operator with pq.Array for proper array conversion
 			query = query.Where("expenses.tags && ?", pq.Array(tags))
 		}
+	}
+
+	return query, opts, nil
+}
+
+// GetExpenses retrieves expenses with filters and pagination
+func GetExpenses(c *gin.Context) {
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, models.NewErrorResponse(models.ErrCodeUnauthorized, "User not authenticated"))
+		return
+	}
+
+	query, opts, err := buildExpenseQuery(c, userID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(models.ErrCodeInvalidInput, err.Error()))
+		return
 	}
 
 	// Get total count for pagination
@@ -156,13 +176,10 @@ func GetExpenses(c *gin.Context) {
 
 	// Execute query with pagination
 	var expensesWithCategories []ExpenseWithCategory
-	orderClause := "expenses.date DESC"
-	if sortOption == "updated" {
-		orderClause = "expenses.updated_at DESC"
-	}
+	offset := (opts.Page - 1) * opts.Limit
 
-	err = query.Order(orderClause).
-		Limit(limit).
+	err = query.Order(opts.OrderClause).
+		Limit(opts.Limit).
 		Offset(offset).
 		Scan(&expensesWithCategories).Error
 	if err != nil {
@@ -171,9 +188,20 @@ func GetExpenses(c *gin.Context) {
 		return
 	}
 
+	expenseIDs := make([]uuid.UUID, 0, len(expensesWithCategories))
+	for _, exp := range expensesWithCategories {
+		expenseIDs = append(expenseIDs, exp.ID)
+	}
+	tagMap, _ := loadTagsForExpenses(expenseIDs)
+
 	// Convert to ExpenseResponse with embedded category
 	expenseResponses := make([]models.ExpenseResponse, len(expensesWithCategories))
 	for i, exp := range expensesWithCategories {
+		tags := exp.Tags
+		if mappedTags, ok := tagMap[exp.ID]; ok {
+			tags = models.StringArray(mappedTags)
+		}
+
 		expenseResponses[i] = models.ExpenseResponse{
 			ID:     exp.ID.String(),
 			UserID: exp.UserID.String(),
@@ -187,7 +215,7 @@ func GetExpenses(c *gin.Context) {
 			AccountID:   exp.AccountID.String(),
 			Date:        exp.Date,
 			Description: exp.Description,
-			Tags:        exp.Tags,
+			Tags:        tags,
 			Verified:    exp.Verified,
 			CreatedAt:   exp.CreatedAt,
 			UpdatedAt:   exp.UpdatedAt,
@@ -207,8 +235,8 @@ func GetExpenses(c *gin.Context) {
 	}
 
 	// Calculate pagination metadata
-	totalPages := int(totalCount) / limit
-	if int(totalCount)%limit > 0 {
+	totalPages := int(totalCount) / opts.Limit
+	if int(totalCount)%opts.Limit > 0 {
 		totalPages++
 	}
 
@@ -216,8 +244,8 @@ func GetExpenses(c *gin.Context) {
 		Success: true,
 		Data:    expenseResponses,
 		Pagination: &models.PaginationMetadata{
-			Page:        page,
-			Limit:       limit,
+			Page:        opts.Page,
+			Limit:       opts.Limit,
 			TotalCount:  int(totalCount),
 			TotalPages:  totalPages,
 			TotalAmount: totalAmount,
@@ -286,10 +314,11 @@ func CreateExpense(c *gin.Context) {
 	}
 
 	// Set default tags if not provided
-	tags := models.StringArray(req.Tags)
-	if len(tags) == 0 {
-		tags = models.StringArray{"misc"}
+	tagValues := normalizeTags(req.Tags)
+	if len(tagValues) == 0 {
+		tagValues = []string{"misc"}
 	}
+	tags := models.StringArray(tagValues)
 
 	// Start transaction
 	err = db.DB.Transaction(func(tx *gorm.DB) error {
@@ -306,6 +335,10 @@ func CreateExpense(c *gin.Context) {
 		}
 
 		if err := tx.Create(&expense).Error; err != nil {
+			return err
+		}
+
+		if err := syncExpenseTags(tx, userID, expense.ID, tagValues); err != nil {
 			return err
 		}
 
@@ -423,6 +456,8 @@ func UpdateExpense(c *gin.Context) {
 
 	// Build updates map dynamically
 	updates := make(map[string]interface{})
+	var normalizedTags []string
+	tagsProvided := false
 
 	if req.Amount != nil {
 		updates["amount"] = *req.Amount
@@ -440,11 +475,12 @@ func UpdateExpense(c *gin.Context) {
 		updates["description"] = *req.Description
 	}
 	if req.Tags != nil {
-		if len(req.Tags) == 0 {
-			updates["tags"] = models.StringArray{"misc"}
-		} else {
-			updates["tags"] = models.StringArray(req.Tags)
+		tagsProvided = true
+		normalizedTags = normalizeTags(req.Tags)
+		if len(normalizedTags) == 0 {
+			normalizedTags = []string{"misc"}
 		}
+		updates["tags"] = models.StringArray(normalizedTags)
 	}
 	if req.Verified != nil {
 		updates["verified"] = *req.Verified
@@ -457,9 +493,23 @@ func UpdateExpense(c *gin.Context) {
 
 	updates["updated_at"] = time.Now()
 
-	err = db.DB.Model(&models.Expense{}).
-		Where("id = ?", expenseID).
-		Updates(updates).Error
+	err = db.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Expense{}).
+			Where("id = ?", expenseID).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+
+		if tagsProvided {
+			if err := tx.Where("expense_id = ?", expenseID).Delete(&models.ExpenseTag{}).Error; err != nil {
+				return err
+			}
+			if err := syncExpenseTags(tx, userID, expenseID, normalizedTags); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		logger.Log.Errorw("Failed to update expense", "error", err)
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(models.ErrCodeDatabaseError, "Failed to update expense"))
@@ -552,6 +602,9 @@ func DeleteExpense(c *gin.Context) {
 
 	// Start transaction
 	err = db.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("expense_id = ?", expenseID).Delete(&models.ExpenseTag{}).Error; err != nil {
+			return err
+		}
 		// Delete expense
 		if err := tx.Delete(&expense).Error; err != nil {
 			return err
@@ -582,6 +635,94 @@ func DeleteExpense(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// ExportExpensesCSV streams filtered expenses as CSV in batches to avoid blocking.
+func ExportExpensesCSV(c *gin.Context) {
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, models.NewErrorResponse(models.ErrCodeUnauthorized, "User not authenticated"))
+		return
+	}
+
+	query, opts, err := buildExpenseQuery(c, userID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(models.ErrCodeInvalidInput, err.Error()))
+		return
+	}
+
+	c.Header("Content-Type", "text/csv")
+	c.Header("Content-Disposition", "attachment; filename=expenses.csv")
+	c.Status(http.StatusOK)
+
+	writer := csv.NewWriter(c.Writer)
+	defer writer.Flush()
+
+	headers := []string{"Date", "Description", "Category", "Account", "Amount", "Tags", "Verified", "CreatedAt", "UpdatedAt"}
+	if err := writer.Write(headers); err != nil {
+		logger.Log.Errorw("Failed to write CSV header", "error", err)
+		return
+	}
+
+	batchSize := 500
+	offset := 0
+
+	for {
+		var batch []ExpenseWithCategory
+		err := query.Order(opts.OrderClause).
+			Limit(batchSize).
+			Offset(offset).
+			Scan(&batch).Error
+		if err != nil {
+			logger.Log.Errorw("Failed to stream expenses", "error", err)
+			return
+		}
+		if len(batch) == 0 {
+			break
+		}
+
+		expenseIDs := make([]uuid.UUID, 0, len(batch))
+		for _, exp := range batch {
+			expenseIDs = append(expenseIDs, exp.ID)
+		}
+		tagMap, _ := loadTagsForExpenses(expenseIDs)
+
+		for _, exp := range batch {
+			tags := exp.Tags
+			if mappedTags, ok := tagMap[exp.ID]; ok {
+				tags = models.StringArray(mappedTags)
+			}
+
+			record := []string{
+				exp.Date.Format("2006-01-02"),
+				exp.Description,
+				exp.CategoryName,
+				exp.AccountID.String(),
+				strconv.FormatFloat(exp.Amount, 'f', 2, 64),
+				strings.Join(tags, ";"),
+				strconv.FormatBool(exp.Verified),
+				exp.CreatedAt.Format(time.RFC3339),
+				exp.UpdatedAt.Format(time.RFC3339),
+			}
+
+			if err := writer.Write(record); err != nil {
+				logger.Log.Errorw("Failed to write CSV record", "error", err)
+				return
+			}
+		}
+
+		writer.Flush()
+		if err := writer.Error(); err != nil {
+			logger.Log.Errorw("Error flushing CSV writer", "error", err)
+			return
+		}
+
+		if flusher, ok := c.Writer.(http.Flusher); ok {
+			flusher.Flush()
+		}
+
+		offset += batchSize
+	}
+}
+
 // GetExpenseTags retrieves all unique tags for the user's expenses
 func GetExpenseTags(c *gin.Context) {
 	userID, err := middleware.GetUserID(c)
@@ -590,36 +731,102 @@ func GetExpenseTags(c *gin.Context) {
 		return
 	}
 
-	// Query to get all unique tags from user's expenses
-	var expenses []models.Expense
-	err = db.DB.Select("tags").Where("user_id = ?", userID).Find(&expenses).Error
+	var tags []string
+	err = db.DB.Model(&models.Tag{}).
+		Where("user_id = ?", userID).
+		Order("name ASC").
+		Pluck("name", &tags).Error
 	if err != nil {
 		logger.Log.Errorw("Failed to get expense tags", "error", err, "userId", userID)
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(models.ErrCodeDatabaseError, "Failed to retrieve tags"))
 		return
 	}
 
-	// Collect all unique tags
-	tagSet := make(map[string]bool)
-	for _, expense := range expenses {
-		for _, tag := range expense.Tags {
-			if tag != "" {
-				tagSet[tag] = true
+	c.JSON(http.StatusOK, models.NewSuccessResponse(gin.H{
+		"tags":  tags,
+		"count": len(tags),
+	}))
+}
+
+func normalizeTags(tags []string) []string {
+	seen := make(map[string]bool)
+	normalized := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		trimmed := strings.TrimSpace(tag)
+		if trimmed == "" {
+			continue
+		}
+		lowered := strings.ToLower(trimmed)
+		if seen[lowered] {
+			continue
+		}
+		seen[lowered] = true
+		normalized = append(normalized, lowered)
+	}
+	return normalized
+}
+
+func syncExpenseTags(tx *gorm.DB, userID uuid.UUID, expenseID uuid.UUID, tags []string) error {
+	if len(tags) == 0 {
+		return nil
+	}
+
+	for _, tagName := range tags {
+		var tag models.Tag
+		err := tx.Where("user_id = ? AND name = ?", userID, tagName).First(&tag).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				tag = models.Tag{
+					UserID: userID,
+					Name:   tagName,
+				}
+				if err := tx.Create(&tag).Error; err != nil {
+					return err
+				}
+			} else {
+				return err
 			}
 		}
+
+		expenseTag := models.ExpenseTag{
+			ExpenseID: expenseID,
+			TagID:     tag.ID,
+		}
+
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "expense_id"}, {Name: "tag_id"}},
+			DoNothing: true,
+		}).Create(&expenseTag).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func loadTagsForExpenses(expenseIDs []uuid.UUID) (map[uuid.UUID][]string, error) {
+	result := make(map[uuid.UUID][]string)
+	if len(expenseIDs) == 0 {
+		return result, nil
 	}
 
-	// Convert to slice
-	uniqueTags := make([]string, 0, len(tagSet))
-	for tag := range tagSet {
-		uniqueTags = append(uniqueTags, tag)
+	var rows []struct {
+		ExpenseID uuid.UUID
+		Name      string
 	}
 
-	// Sort tags alphabetically for consistent output
-	sort.Strings(uniqueTags)
+	err := db.DB.Table("expense_tags").
+		Select("expense_tags.expense_id, tags.name").
+		Joins("JOIN tags ON tags.id = expense_tags.tag_id").
+		Where("expense_tags.expense_id IN ?", expenseIDs).
+		Order("tags.name ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return result, err
+	}
 
-	c.JSON(http.StatusOK, models.NewSuccessResponse(gin.H{
-		"tags":  uniqueTags,
-		"count": len(uniqueTags),
-	}))
+	for _, row := range rows {
+		result[row.ExpenseID] = append(result[row.ExpenseID], row.Name)
+	}
+
+	return result, nil
 }

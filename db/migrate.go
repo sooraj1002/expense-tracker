@@ -21,6 +21,8 @@ func RunMigrations() error {
 		&models.Category{},
 		&models.Account{},
 		&models.Expense{},
+		&models.Tag{},
+		&models.ExpenseTag{},
 		&models.MerchantPattern{},
 		&models.MerchantInfo{},
 		&models.Device{},
