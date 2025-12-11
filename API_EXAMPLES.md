@@ -1,29 +1,18 @@
-# API Endpoint Examples
+# API Endpoint Examples (Backend Canonical)
 
 Base URL: `{{base_url}}`
 
-## Table of Contents
-- [Health Check](#health-check)
-- [Authentication](#authentication)
-- [Categories](#categories)
-- [Accounts](#accounts)
-- [Expenses](#expenses)
-- [Merchant Patterns](#merchant-patterns)
+Use `Authorization: Bearer {{jwt}}` for all endpoints except `/health`, `/api/auth/register`, `/api/auth/login`, and `/api/auth/refresh`.
 
----
+## Health
 
-## Health Check
-
-### Check API Health
 ```bash
 curl {{base_url}}/health
 ```
 
----
-
 ## Authentication
 
-### Register New User
+- Register
 ```bash
 curl -X POST {{base_url}}/api/auth/register \
   -H "Content-Type: application/json" \
@@ -34,24 +23,7 @@ curl -X POST {{base_url}}/api/auth/register \
   }'
 ```
 
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "user": {
-      "id": "uuid",
-      "email": "user@example.com",
-      "name": "John Doe",
-      "createdAt": "timestamp",
-      "updatedAt": "timestamp"
-    },
-    "token": "jwt_token_here"
-  }
-}
-```
-
-### Login
+- Login
 ```bash
 curl -X POST {{base_url}}/api/auth/login \
   -H "Content-Type: application/json" \
@@ -61,22 +33,21 @@ curl -X POST {{base_url}}/api/auth/login \
   }'
 ```
 
-### Refresh Token
+- Refresh token
 ```bash
 curl -X POST {{base_url}}/api/auth/refresh \
   -H "Content-Type: application/json" \
   -d '{
-    "token": "your_existing_jwt_token"
+    "token": "{{existing_jwt}}"
   }'
 ```
 
-### Get Current User Profile
+- Current user
 ```bash
-curl {{base_url}}/api/auth/me \
-  -H "Authorization: Bearer {{jwt}}"
+curl {{base_url}}/api/auth/me -H "Authorization: Bearer {{jwt}}"
 ```
 
-### Register Device
+- Register device
 ```bash
 curl -X POST {{base_url}}/api/auth/devices/register \
   -H "Authorization: Bearer {{jwt}}" \
@@ -87,17 +58,14 @@ curl -X POST {{base_url}}/api/auth/devices/register \
   }'
 ```
 
----
-
 ## Categories
 
-### Get All Categories
+- List
 ```bash
-curl {{base_url}}/api/categories \
-  -H "Authorization: Bearer {{jwt}}"
+curl {{base_url}}/api/categories -H "Authorization: Bearer {{jwt}}"
 ```
 
-### Create Category
+- Create
 ```bash
 curl -X POST {{base_url}}/api/categories \
   -H "Authorization: Bearer {{jwt}}" \
@@ -108,7 +76,7 @@ curl -X POST {{base_url}}/api/categories \
   }'
 ```
 
-### Update Category
+- Update
 ```bash
 curl -X PUT {{base_url}}/api/categories/CATEGORY_ID \
   -H "Authorization: Bearer {{jwt}}" \
@@ -119,23 +87,20 @@ curl -X PUT {{base_url}}/api/categories/CATEGORY_ID \
   }'
 ```
 
-### Delete Category
+- Delete
 ```bash
 curl -X DELETE {{base_url}}/api/categories/CATEGORY_ID \
   -H "Authorization: Bearer {{jwt}}"
 ```
 
----
-
 ## Accounts
 
-### Get All Accounts
+- List
 ```bash
-curl {{base_url}}/api/accounts \
-  -H "Authorization: Bearer {{jwt}}"
+curl {{base_url}}/api/accounts -H "Authorization: Bearer {{jwt}}"
 ```
 
-### Create Account
+- Create
 ```bash
 curl -X POST {{base_url}}/api/accounts \
   -H "Authorization: Bearer {{jwt}}" \
@@ -146,7 +111,7 @@ curl -X POST {{base_url}}/api/accounts \
   }'
 ```
 
-### Update Account
+- Update
 ```bash
 curl -X PUT {{base_url}}/api/accounts/ACCOUNT_ID \
   -H "Authorization: Bearer {{jwt}}" \
@@ -157,59 +122,76 @@ curl -X PUT {{base_url}}/api/accounts/ACCOUNT_ID \
   }'
 ```
 
-### Delete Account
+- Delete (fails if expenses exist for the account)
 ```bash
 curl -X DELETE {{base_url}}/api/accounts/ACCOUNT_ID \
   -H "Authorization: Bearer {{jwt}}"
 ```
 
-### Get Account Summary
+- Summary
 ```bash
-curl {{base_url}}/api/accounts/summary \
-  -H "Authorization: Bearer {{jwt}}"
+curl {{base_url}}/api/accounts/summary -H "Authorization: Bearer {{jwt}}"
 ```
 
-### Get Account Expenses
+- Account expenses (filters: `year`, `month`, `page`, `limit` [1-100, default 20])
 ```bash
-# Basic
-curl {{base_url}}/api/accounts/ACCOUNT_ID/expenses \
-  -H "Authorization: Bearer {{jwt}}"
-
-# With filters (year, month, pagination)
-curl "{{base_url}}/api/accounts/ACCOUNT_ID/expenses?year=2025&month=11&page=1&limit=20" \
+curl "{{base_url}}/api/accounts/ACCOUNT_ID/expenses?page=1&limit=20&year=2025&month=11" \
   -H "Authorization: Bearer {{jwt}}"
 ```
-
----
 
 ## Expenses
 
-### Get All Expenses
-```bash
-# Basic
-curl {{base_url}}/api/expenses \
-  -H "Authorization: Bearer {{jwt}}"
+- List (pagination + filters)
+  - `page` (default 1)
+  - `limit` (default 20, max 100)
+  - `year` / `month` (legacy)
+  - `period` one of `today|week|month|year`
+  - `startDate`, `endDate` (YYYY-MM-DD, inclusive)
+  - `accountId`, `categoryId`
+  - `tags` (comma-separated; matches any overlap)
+  - `sort` one of `date` (default) or `updated`
 
-# With filters
-curl "{{base_url}}/api/expenses?year=2025&month=11&accountId=ACCOUNT_ID&page=1&limit=20" \
+```bash
+curl "{{base_url}}/api/expenses?page=1&limit=20&period=month&accountId=ACCOUNT_ID&categoryId=CATEGORY_ID&tags=food,subway&sort=updated" \
   -H "Authorization: Bearer {{jwt}}"
 ```
 
-### Create Expense
-```bash
-# Without tags (defaults to ["misc"])
-curl -X POST {{base_url}}/api/expenses \
-  -H "Authorization: Bearer {{jwt}}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "amount": 1500.00,
-    "categoryId": "CATEGORY_ID",
-    "accountId": "ACCOUNT_ID",
-    "date": "2025-11-02T10:30:00Z",
-    "description": "Lunch at restaurant"
-  }'
+**Response shape**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "userId": "uuid",
+      "amount": 1500.0,
+      "category": {
+        "categoryId": "uuid",
+        "categoryName": "Food",
+        "color": "#FF5722",
+        "isDefault": false
+      },
+      "accountId": "uuid",
+      "date": "2025-11-02T10:30:00Z",
+      "description": "Lunch at Subway",
+      "tags": ["food", "Subway"],
+      "verified": true,
+      "createdAt": "timestamp",
+      "updatedAt": "timestamp"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "totalCount": 42,
+    "totalPages": 3,
+    "totalAmount": 52340.75
+  }
+}
+```
 
-# With single tag (including merchant name in tag)
+- Create (tags default to `["misc"]`; backend marks `verified=true`)
+```bash
 curl -X POST {{base_url}}/api/expenses \
   -H "Authorization: Bearer {{jwt}}" \
   -H "Content-Type: application/json" \
@@ -221,77 +203,44 @@ curl -X POST {{base_url}}/api/expenses \
     "description": "Lunch at Subway",
     "tags": ["food", "Subway"]
   }'
-
-# With multiple tags (merchant, category, etc)
-curl -X POST {{base_url}}/api/expenses \
-  -H "Authorization: Bearer {{jwt}}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "amount": 1500.00,
-    "categoryId": "CATEGORY_ID",
-    "accountId": "ACCOUNT_ID",
-    "date": "2025-11-02T10:30:00Z",
-    "description": "Business lunch with client at Starbucks",
-    "tags": ["food", "Starbucks", "business", "client-meeting", "reimbursable"]
-  }'
 ```
 
-### Update Expense
+- Update (any subset of fields)
 ```bash
-# Update amount and tags
 curl -X PUT {{base_url}}/api/expenses/EXPENSE_ID \
   -H "Authorization: Bearer {{jwt}}" \
   -H "Content-Type: application/json" \
   -d '{
     "amount": 1650.00,
-    "tags": ["food", "Subway", "dining", "tip-included"]
-  }'
-
-# Update only tags (e.g., changing merchant)
-curl -X PUT {{base_url}}/api/expenses/EXPENSE_ID \
-  -H "Authorization: Bearer {{jwt}}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tags": ["food", "Chipotle", "lunch"]
+    "categoryId": "CATEGORY_ID",
+    "accountId": "ACCOUNT_ID",
+    "date": "2025-11-03T12:00:00Z",
+    "description": "Team lunch",
+    "tags": ["food", "team"],
+    "verified": true
   }'
 ```
 
-### Delete Expense
+- Delete
 ```bash
 curl -X DELETE {{base_url}}/api/expenses/EXPENSE_ID \
   -H "Authorization: Bearer {{jwt}}"
 ```
 
-### Get All Expense Tags
-Get all unique tags from user's expenses, sorted alphabetically.
-
+- All expense tags (alphabetical)
 ```bash
-curl {{base_url}}/api/expenses/tags \
-  -H "Authorization: Bearer {{jwt}}"
+curl {{base_url}}/api/expenses/tags -H "Authorization: Bearer {{jwt}}"
 ```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "tags": ["business", "food", "misc", "shopping", "transport"],
-    "count": 5
-  }
-}
-```
-
----
 
 ## Merchant Patterns
 
-### Get All Merchant Patterns
+- List (optional `isActive=true|false`)
 ```bash
-curl {{base_url}}/api/merchant-patterns \
+curl "{{base_url}}/api/merchant-patterns?isActive=true" \
   -H "Authorization: Bearer {{jwt}}"
 ```
 
-### Create Merchant Pattern
+- Create (match types: `exact`, `contains`)
 ```bash
 curl -X POST {{base_url}}/api/merchant-patterns \
   -H "Authorization: Bearer {{jwt}}" \
@@ -303,32 +252,25 @@ curl -X POST {{base_url}}/api/merchant-patterns \
   }'
 ```
 
-**Match Types:**
-- `exact` - Exact match
-- `contains` - Contains the merchant name
-- `startswith` - Starts with the merchant name
-- `regex` - Regular expression match
-
-### Update Merchant Pattern
+- Update
 ```bash
 curl -X PUT {{base_url}}/api/merchant-patterns/PATTERN_ID \
   -H "Authorization: Bearer {{jwt}}" \
   -H "Content-Type: application/json" \
   -d '{
-    "merchantName": "Swiggy*",
     "categoryId": "CATEGORY_ID",
-    "matchType": "contains",
+    "matchType": "exact",
     "isActive": true
   }'
 ```
 
-### Delete Merchant Pattern
+- Delete
 ```bash
 curl -X DELETE {{base_url}}/api/merchant-patterns/PATTERN_ID \
   -H "Authorization: Bearer {{jwt}}"
 ```
 
-### Match Merchant Pattern
+- Match test
 ```bash
 curl -X POST {{base_url}}/api/merchant-patterns/match \
   -H "Authorization: Bearer {{jwt}}" \
@@ -338,97 +280,9 @@ curl -X POST {{base_url}}/api/merchant-patterns/match \
   }'
 ```
 
----
-
-## Complete Workflow Example
-
-```bash
-# 1. Register a user
-REGISTER_RESPONSE=$(curl -s -X POST {{base_url}}/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "demo@example.com",
-    "password": "demo123456",
-    "name": "Demo User"
-  }')
-
-# Extract token
-TOKEN=$(echo $REGISTER_RESPONSE | jq -r '.data.token')
-
-echo "Token: $TOKEN"
-
-# 2. Create a category
-CATEGORY_RESPONSE=$(curl -s -X POST {{base_url}}/api/categories \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Food",
-    "color": "#FF5722"
-  }')
-
-CATEGORY_ID=$(echo $CATEGORY_RESPONSE | jq -r '.data.id')
-echo "Category ID: $CATEGORY_ID"
-
-# 3. Create an account
-ACCOUNT_RESPONSE=$(curl -s -X POST {{base_url}}/api/accounts \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Main Account",
-    "initialBalance": 100000.00
-  }')
-
-ACCOUNT_ID=$(echo $ACCOUNT_RESPONSE | jq -r '.data.id')
-echo "Account ID: $ACCOUNT_ID"
-
-# 4. Create an expense
-curl -s -X POST {{base_url}}/api/expenses \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"amount\": 350.00,
-    \"categoryId\": \"$CATEGORY_ID\",
-    \"accountId\": \"$ACCOUNT_ID\",
-    \"date\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
-    \"description\": \"Coffee and snacks\",
-    \"merchantName\": \"Starbucks\"
-  }" | jq .
-
-# 5. Get all expenses
-curl -s {{base_url}}/api/expenses \
-  -H "Authorization: Bearer $TOKEN" | jq .
-
-# 6. Get account summary
-curl -s {{base_url}}/api/accounts/summary \
-  -H "Authorization: Bearer $TOKEN" | jq .
-```
-
----
-
 ## Notes
 
-1. **Authentication**: All endpoints except `/health`, `/api/auth/register`, `/api/auth/login`, and `/api/auth/refresh` require a JWT token in the Authorization header.
-
-2. **Token Format**: `Authorization: Bearer {{jwt}}`
-
-3. **Date Format**: ISO 8601 format (e.g., `2025-11-02T10:30:00Z`)
-
-4. **UUIDs**: Replace placeholders like `CATEGORY_ID`, `ACCOUNT_ID`, `EXPENSE_ID`, etc. with actual UUIDs from your responses.
-
-5. **Pagination**: Use `page` and `limit` query parameters (default: page=1, limit=50)
-
-6. **Filtering**:
-   - Expenses can be filtered by `year`, `month`, and `accountId`
-   - Account expenses can be filtered by `year` and `month`
-
-7. **Tags**:
-   - Each expense can have multiple tags (array of strings)
-   - If no tags are provided when creating an expense, it defaults to `["misc"]`
-   - Tags are returned in sorted alphabetical order from `/api/expenses/tags`
-   - Use tags for flexible categorization including:
-     - Merchant names (e.g., "Subway", "Starbucks", "Amazon")
-     - Expense types (e.g., "food", "transport", "shopping")
-     - Additional attributes (e.g., "urgent", "reimbursable", "tax-deductible", "business")
-   - Tags replace the previous `merchantName` field - include merchant names as tags
-
-8. **Pretty Print JSON**: Add `| jq .` to any curl command to format the JSON response (requires `jq` to be installed)
+- Pagination defaults: `page=1`, `limit=20` (max 100).
+- Expense filters support `period`, `startDate/endDate`, `accountId`, `categoryId`, `tags`, `year/month`, and `sort=date|updated`. There is no server-side text search.
+- Expenses return embedded category details and pagination metadata including `totalAmount` for the filtered set.
+- Tags are the flexible labeling system (include merchant names as tags if needed).
