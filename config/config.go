@@ -15,6 +15,7 @@ type Config struct {
 	Database DatabaseConfig
 	Server   ServerConfig
 	JWT      JWTConfig
+	CORS     CORSConfig
 }
 
 type DatabaseConfig struct {
@@ -29,6 +30,10 @@ type DatabaseConfig struct {
 type ServerConfig struct {
 	Port        string
 	Environment string
+}
+
+type CORSConfig struct {
+	AllowedOrigins []string
 }
 
 type JWTConfig struct {
@@ -69,6 +74,14 @@ func LoadConfig() error {
 		JWT: JWTConfig{
 			Secret: getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
 			Expiry: jwtExpiry,
+		},
+		CORS: CORSConfig{
+			AllowedOrigins: parseCSVEnv(
+				getEnv(
+					"ALLOWED_ORIGINS",
+					"http://localhost:3000,http://127.0.0.1:3000",
+				),
+			),
 		},
 	}
 
@@ -140,4 +153,17 @@ func parseDatabaseURL(rawURL string) (DatabaseConfig, error) {
 		DBName:   dbName,
 		SSLMode:  sslMode,
 	}, nil
+}
+
+func parseCSVEnv(value string) []string {
+	parts := strings.Split(value, ",")
+	parsed := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		parsed = append(parsed, trimmed)
+	}
+	return parsed
 }
