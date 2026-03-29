@@ -1,19 +1,72 @@
-# Task
+# Expense Tracker — Go Backend
 
-YOU are creating an expense tracking app which will work on a google pixel 9, so you have access to a TPU and basic on device AI. There is already a plan in BACKEND_API.md and FRONTEND_API.md... the backend will be built in golang... There will be a android app which will read notifications/messages, and do a basic classifications of all bank transactions. there will also be a web app which will help the user see the graphs etc easier, but it will work on the android device as well..
+## Purpose
+REST API backend for a personal expense tracker. Stores expenses, accounts, and categories. Designed to be a thin storage layer — heavy classification logic lives in the Android app. Also serves as the target for the voice server's tool calls.
 
+## Stack
+- **Go** with Gin framework
+- **PostgreSQL** via GORM (ORM)
+- **JWT** auth (access + refresh tokens, cookies: `tracker_access`, `tracker_refresh`)
+- Runs in Docker, internal port **8080**, exposed as **8082** on the host
 
-## Core Functionality
-Similar to how truecaller works with its notifcations -- reads the notifications, get the merchant. if classification isnt possible, then a basic location should be recorded... the android app will do a lot of the heavy lifiting tbh. the backend will just be to store. and during the day, it will all be on the local storage of the app, and will be synced using rsync to google drive.
+## Running
+```bash
+# Local
+go run . serve
 
+# Docker (from expenses-stack/)
+docker compose up backend
+docker compose build backend && docker compose up -d --force-recreate backend
+```
 
-## Infrastructure
+## Key structure
+```
+cmd/serve.go          — HTTP server setup, graceful shutdown
+api/router.go         — All route definitions
+api/handlers/         — One file per domain (expenses, accounts, categories, etc.)
+api/middleware/       — auth.go (JWT), cors.go, logger.go
+models/               — GORM models (Expense, Account, Category, MerchantPattern, etc.)
+db/migrate.go         — Auto-migration on startup
+config/               — Loads env vars into AppConfig struct
+```
 
-- **Database**: PostgreSQL running in a Docker container
-  - Database name: `expense_tracker`
-  - Default user: `postgres`
+## Auth
+All `/api/*` routes require `Authorization: Bearer <token>` except:
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/refresh`
+- `POST /api/admin/*` (no JWT — be careful)
 
+`middleware.AuthMiddleware()` sets `userID` (uuid.UUID) and `email` (string) in Gin context.
+
+## Expense model (key fields)
+```go
+Amount      decimal   // required, > 0
+CategoryID  uuid      // required — must exist
+AccountID   uuid      // required — must exist, balance updated on create/delete
+Date        time.Time // required
+Description string    // optional
+Tags        []string  // defaults to ["misc"]
+Verified    bool      // defaults to true on manual create
+```
+Creating an expense runs a DB transaction: inserts expense + syncs tags + updates account `current_balance` and `total_spent`.
+
+## CORS
+Controlled by `ALLOWED_ORIGINS` env var (comma-separated). The voice server calls the backend server-to-server so CORS doesn't apply to those calls.
+
+## Environment variables
+```
+DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, DB_SSLMODE
+PORT=8080
+JWT_SECRET
+JWT_EXPIRY=24h
+ALLOWED_ORIGINS=http://localhost:3000,...
+ENVIRONMENT=development|production
+```
 
 ## Development process
+Before making code changes for any task, create `./progress/{task}.md` with a plan and get it reviewed before writing code. Keep it updated as work progresses.
 
-- When making any changes for any task, in ./progress/{task}.md, keep an updated log of your todo list, your plan for executing the todo list as a basic overview for a reviewer. keep checking off/adding/updating items as you come across more things you need to account for while working on the task at hand. Only start working on a task after the initial plan stored in progress has been reviewed and accepted. This rule is non-negotiable for anything where you would be making code changes.
+## Known issues / history
+- `middleware/logger.go` had a `fmt.Printf` debug statement inside `sanitizeHeaders` that caused stdout blocking when Docker's log buffer filled up, making all requests hang. Fixed — do not add `fmt.Print*` calls anywhere in middleware.
+- The Docker bridge interface (`br-*`) can lose its host IP if NetworkManager interferes. Fixed by `/etc/NetworkManager/conf.d/docker.conf` marking bridge interfaces as unmanaged.

@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -99,7 +98,6 @@ func sanitizeHeaders(headers http.Header) map[string]string {
 
 	sanitized := make(map[string]string, len(headers))
 	for key, values := range headers {
-		fmt.Printf("Header: %s => Values: %v\n", key, values)
 		if shouldRedactHeader(key) {
 			sanitized[key] = "[REDACTED]"
 			continue
