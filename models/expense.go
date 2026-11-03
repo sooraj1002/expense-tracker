@@ -12,6 +12,7 @@ type Expense struct {
 	ID          uuid.UUID   `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 	UserID      uuid.UUID   `json:"userId" gorm:"type:uuid;column:user_id;not null;index"`
 	Amount      float64     `json:"amount" gorm:"type:decimal(15,2);not null" binding:"required,gt=0"`
+	Currency    string      `json:"currency" gorm:"type:varchar(3);not null;default:'INR';check:currency IN ('USD','SGD','INR')" binding:"omitempty,oneof=USD SGD INR"`
 	CategoryID  uuid.UUID   `json:"categoryId" gorm:"type:uuid;column:category_id;not null;index" binding:"required"`
 	AccountID   uuid.UUID   `json:"accountId" gorm:"type:uuid;column:account_id;not null;index" binding:"required"`
 	Date        time.Time   `json:"date" gorm:"not null;index" binding:"required"`
@@ -27,6 +28,7 @@ type Expense struct {
 
 type CreateExpenseRequest struct {
 	Amount      float64   `json:"amount" binding:"required,gt=0"`
+	Currency    string    `json:"currency" binding:"omitempty,oneof=USD SGD INR"`
 	CategoryID  uuid.UUID `json:"categoryId" binding:"required"`
 	AccountID   uuid.UUID `json:"accountId" binding:"required"`
 	Date        time.Time `json:"date" binding:"required"`
@@ -36,6 +38,7 @@ type CreateExpenseRequest struct {
 
 type UpdateExpenseRequest struct {
 	Amount      *float64   `json:"amount" binding:"omitempty,gt=0"`
+	Currency    *string    `json:"currency" binding:"omitempty,oneof=USD SGD INR"`
 	CategoryID  *uuid.UUID `json:"categoryId"`
 	AccountID   *uuid.UUID `json:"accountId"`
 	Date        *time.Time `json:"date"`
@@ -70,6 +73,7 @@ type ExpenseResponse struct {
 	ID          string         `json:"id"`
 	UserID      string         `json:"userId"`
 	Amount      float64        `json:"amount"`
+	Currency    string         `json:"currency"`
 	Category    CategoryBasic  `json:"category"`
 	AccountID   string         `json:"accountId"`
 	Date        time.Time      `json:"date"`

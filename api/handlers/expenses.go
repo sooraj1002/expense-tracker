@@ -203,9 +203,10 @@ func GetExpenses(c *gin.Context) {
 		}
 
 		expenseResponses[i] = models.ExpenseResponse{
-			ID:     exp.ID.String(),
-			UserID: exp.UserID.String(),
-			Amount: exp.Amount,
+			ID:       exp.ID.String(),
+			UserID:   exp.UserID.String(),
+			Amount:   exp.Amount,
+			Currency: exp.Currency,
 			Category: models.CategoryBasic{
 				CategoryID:   exp.CategoryID.String(),
 				CategoryName: exp.CategoryName,
@@ -320,12 +321,18 @@ func CreateExpense(c *gin.Context) {
 	}
 	tags := models.StringArray(tagValues)
 
+	currency := req.Currency
+	if currency == "" {
+		currency = "INR"
+	}
+
 	// Start transaction
 	err = db.DB.Transaction(func(tx *gorm.DB) error {
 		// Create expense
 		expense := models.Expense{
 			UserID:      userID,
 			Amount:      req.Amount,
+			Currency:    currency,
 			CategoryID:  req.CategoryID,
 			AccountID:   req.AccountID,
 			Date:        req.Date,
@@ -382,9 +389,10 @@ func CreateExpense(c *gin.Context) {
 
 	// Convert to ExpenseResponse
 	expenseResponse := models.ExpenseResponse{
-		ID:     expenseWithCategory.ID.String(),
-		UserID: expenseWithCategory.UserID.String(),
-		Amount: expenseWithCategory.Amount,
+		ID:       expenseWithCategory.ID.String(),
+		UserID:   expenseWithCategory.UserID.String(),
+		Amount:   expenseWithCategory.Amount,
+		Currency: expenseWithCategory.Currency,
 		Category: models.CategoryBasic{
 			CategoryID:   expenseWithCategory.CategoryID.String(),
 			CategoryName: expenseWithCategory.CategoryName,
@@ -462,6 +470,9 @@ func UpdateExpense(c *gin.Context) {
 	if req.Amount != nil {
 		updates["amount"] = *req.Amount
 	}
+	if req.Currency != nil {
+		updates["currency"] = *req.Currency
+	}
 	if req.CategoryID != nil {
 		updates["category_id"] = *req.CategoryID
 	}
@@ -534,9 +545,10 @@ func UpdateExpense(c *gin.Context) {
 
 	// Convert to ExpenseResponse
 	expenseResponse := models.ExpenseResponse{
-		ID:     expenseWithCategory.ID.String(),
-		UserID: expenseWithCategory.UserID.String(),
-		Amount: expenseWithCategory.Amount,
+		ID:       expenseWithCategory.ID.String(),
+		UserID:   expenseWithCategory.UserID.String(),
+		Amount:   expenseWithCategory.Amount,
+		Currency: expenseWithCategory.Currency,
 		Category: models.CategoryBasic{
 			CategoryID:   expenseWithCategory.CategoryID.String(),
 			CategoryName: expenseWithCategory.CategoryName,
@@ -656,7 +668,7 @@ func ExportExpensesCSV(c *gin.Context) {
 	writer := csv.NewWriter(c.Writer)
 	defer writer.Flush()
 
-	headers := []string{"Date", "Description", "Category", "Account", "Amount", "Tags", "Verified", "CreatedAt", "UpdatedAt"}
+	headers := []string{"Date", "Description", "Category", "Account", "Amount", "Currency", "Tags", "Verified", "CreatedAt", "UpdatedAt"}
 	if err := writer.Write(headers); err != nil {
 		logger.Log.Errorw("Failed to write CSV header", "error", err)
 		return
@@ -697,6 +709,7 @@ func ExportExpensesCSV(c *gin.Context) {
 				exp.CategoryName,
 				exp.AccountID.String(),
 				strconv.FormatFloat(exp.Amount, 'f', 2, 64),
+				exp.Currency,
 				strings.Join(tags, ";"),
 				strconv.FormatBool(exp.Verified),
 				exp.CreatedAt.Format(time.RFC3339),
