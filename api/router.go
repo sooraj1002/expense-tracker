@@ -58,6 +58,8 @@ func SetupRouter() *gin.Engine {
 			protected.POST("/categories", handlers.CreateCategory)
 			protected.PUT("/categories/:id", handlers.UpdateCategory)
 			protected.DELETE("/categories/:id", handlers.DeleteCategory)
+			protected.PUT("/categories/:id/budget", handlers.SetCategoryBudget)
+			protected.DELETE("/categories/:id/budget", handlers.ClearCategoryBudget)
 
 			// Accounts
 			protected.GET("/accounts", handlers.GetAccounts)

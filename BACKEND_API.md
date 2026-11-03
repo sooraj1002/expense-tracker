@@ -31,6 +31,8 @@ Represents a spending category (user-defined or system default).
 | `name`  | string | Display name of the category     | "Groceries"    |
 | `color` | string | Hex color code for UI elements   | "#FFD700"      |
 | `isDefault` | boolean | Whether this is a system default category | false |
+| `monthlyBudget` | number \| null | Authenticated user's recurring monthly INR budget | 12000 |
+| `monthlySpent` | number | Authenticated user's INR spend in this category for the current UTC calendar month | 8750.50 |
 
 ### `Account`
 
@@ -173,9 +175,9 @@ Retrieves a list of all available expense categories (system defaults + user cus
 - **Response `200 OK`**
   ```json
   [
-    { "id": "cat-1", "userId": null, "name": "Groceries", "color": "#4CAF50", "isDefault": true },
-    { "id": "cat-2", "userId": null, "name": "Transport", "color": "#2196F3", "isDefault": true },
-    { "id": "cat-3", "userId": "user-123", "name": "Gaming", "color": "#FFC107", "isDefault": false }
+    { "id": "cat-1", "userId": null, "name": "Groceries", "color": "#4CAF50", "isDefault": true, "monthlyBudget": 12000, "monthlySpent": 8750.50 },
+    { "id": "cat-2", "userId": null, "name": "Transport", "color": "#2196F3", "isDefault": true, "monthlyBudget": null, "monthlySpent": 2100 },
+    { "id": "cat-3", "userId": "user-123", "name": "Gaming", "color": "#FFC107", "isDefault": false, "monthlyBudget": 3000, "monthlySpent": 3250 }
   ]
   ```
 
@@ -229,6 +231,27 @@ Deletes a custom category (cannot delete system defaults).
 
 - **Response `403 Forbidden`**
   - If trying to delete a system default category or category with existing expenses
+
+#### `PUT /api/categories/:id/budget`
+
+Sets or replaces the authenticated user's recurring monthly INR budget. Budgets may be set on both system default and user-owned custom categories.
+
+- **Request Body:**
+  ```json
+  {
+    "amount": 12000
+  }
+  ```
+
+- **Response `200 OK`**
+  - Returns the category with its updated `monthlyBudget` and current `monthlySpent`.
+
+#### `DELETE /api/categories/:id/budget`
+
+Clears the authenticated user's monthly budget for the category without deleting the category.
+
+- **Response `200 OK`**
+  - Returns the category with `monthlyBudget` set to `null`.
 
 ### Accounts
 

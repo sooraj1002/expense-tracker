@@ -19,6 +19,7 @@ func RunMigrations() error {
 	err := DB.AutoMigrate(
 		&models.User{},
 		&models.Category{},
+		&models.CategoryBudget{},
 		&models.Account{},
 		&models.Expense{},
 		&models.Tag{},

@@ -12,7 +12,77 @@ import (
 	"github.com/sooraj1002/expense-tracker/logger"
 	"github.com/sooraj1002/expense-tracker/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+type categoryMonthlySpend struct {
+	CategoryID uuid.UUID `gorm:"column:category_id"`
+	Amount     float64   `gorm:"column:amount"`
+}
+
+func loadCategoryResponses(userID uuid.UUID, categories []models.Category) ([]models.CategoryResponse, error) {
+	budgets := []models.CategoryBudget{}
+	if err := db.DB.Where("user_id = ?", userID).Find(&budgets).Error; err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	nextMonth := monthStart.AddDate(0, 1, 0)
+	spending := []categoryMonthlySpend{}
+	if err := db.DB.Model(&models.Expense{}).
+		Select("category_id, COALESCE(SUM(amount), 0) AS amount").
+		Where("user_id = ? AND date >= ? AND date < ? AND currency = ?", userID, monthStart, nextMonth, "INR").
+		Group("category_id").
+		Scan(&spending).Error; err != nil {
+		return nil, err
+	}
+
+	budgetByCategory := make(map[uuid.UUID]float64, len(budgets))
+	for _, budget := range budgets {
+		budgetByCategory[budget.CategoryID] = budget.Amount
+	}
+	spendByCategory := make(map[uuid.UUID]float64, len(spending))
+	for _, spend := range spending {
+		spendByCategory[spend.CategoryID] = spend.Amount
+	}
+
+	responses := make([]models.CategoryResponse, 0, len(categories))
+	for _, category := range categories {
+		response := models.CategoryResponse{
+			Category:     category,
+			MonthlySpent: spendByCategory[category.ID],
+		}
+		if amount, ok := budgetByCategory[category.ID]; ok {
+			budgetAmount := amount
+			response.MonthlyBudget = &budgetAmount
+		}
+		responses = append(responses, response)
+	}
+
+	return responses, nil
+}
+
+func getVisibleCategory(userID, categoryID uuid.UUID) (models.Category, error) {
+	var category models.Category
+	err := db.DB.Where("id = ? AND (user_id IS NULL OR user_id = ?)", categoryID, userID).
+		First(&category).Error
+	return category, err
+}
+
+func respondWithCategory(c *gin.Context, userID uuid.UUID, category models.Category) {
+	responses, err := loadCategoryResponses(userID, []models.Category{category})
+	if err != nil {
+		logger.Log.Errorw("Failed to load category budget status", "error", err, "categoryId", category.ID, "userId", userID)
+		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+			models.ErrCodeDatabaseError,
+			"Failed to retrieve category budget",
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.NewSuccessResponse(responses[0]))
+}
 
 // GetCategories retrieves all categories (system defaults + user custom)
 func GetCategories(c *gin.Context) {
@@ -39,7 +109,17 @@ func GetCategories(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, models.NewSuccessResponse(categories))
+	responses, err := loadCategoryResponses(userID, categories)
+	if err != nil {
+		logger.Log.Errorw("Failed to load category budget status", "error", err, "userId", userID)
+		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+			models.ErrCodeDatabaseError,
+			"Failed to retrieve categories",
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.NewSuccessResponse(responses))
 }
 
 // CreateCategory creates a new custom category for the user
@@ -82,7 +162,17 @@ func CreateCategory(c *gin.Context) {
 
 	logger.Log.Infow("Category created", "categoryId", category.ID, "userId", userID, "name", req.Name)
 
-	c.JSON(http.StatusCreated, models.NewSuccessResponse(category))
+	responses, err := loadCategoryResponses(userID, []models.Category{category})
+	if err != nil {
+		logger.Log.Errorw("Failed to load created category budget status", "error", err, "categoryId", category.ID, "userId", userID)
+		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+			models.ErrCodeDatabaseError,
+			"Category created but could not be retrieved",
+		))
+		return
+	}
+
+	c.JSON(http.StatusCreated, models.NewSuccessResponse(responses[0]))
 }
 
 // UpdateCategory updates an existing custom category
@@ -168,7 +258,126 @@ func UpdateCategory(c *gin.Context) {
 
 	logger.Log.Infow("Category updated", "categoryId", categoryID, "userId", userID)
 
-	c.JSON(http.StatusOK, models.NewSuccessResponse(category))
+	respondWithCategory(c, userID, category)
+}
+
+// SetCategoryBudget creates or updates the authenticated user's monthly budget.
+func SetCategoryBudget(c *gin.Context) {
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, models.NewErrorResponse(
+			models.ErrCodeUnauthorized,
+			"User not authenticated",
+		))
+		return
+	}
+
+	categoryID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+			models.ErrCodeInvalidInput,
+			"Invalid category ID",
+		))
+		return
+	}
+
+	var req models.SetCategoryBudgetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+			models.ErrCodeInvalidInput,
+			err.Error(),
+		))
+		return
+	}
+
+	category, err := getVisibleCategory(userID, categoryID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, models.NewErrorResponse(
+			models.ErrCodeNotFound,
+			"Category not found",
+		))
+		return
+	}
+	if err != nil {
+		logger.Log.Errorw("Failed to get category for budget", "error", err, "categoryId", categoryID, "userId", userID)
+		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+			models.ErrCodeDatabaseError,
+			"Failed to update category budget",
+		))
+		return
+	}
+
+	budget := models.CategoryBudget{
+		UserID:     userID,
+		CategoryID: categoryID,
+		Amount:     req.Amount,
+	}
+	err = db.DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_id"}, {Name: "category_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"amount", "updated_at"}),
+	}).Create(&budget).Error
+	if err != nil {
+		logger.Log.Errorw("Failed to set category budget", "error", err, "categoryId", categoryID, "userId", userID)
+		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+			models.ErrCodeDatabaseError,
+			"Failed to update category budget",
+		))
+		return
+	}
+
+	logger.Log.Infow("Category budget updated", "categoryId", categoryID, "userId", userID, "amount", req.Amount)
+	respondWithCategory(c, userID, category)
+}
+
+// ClearCategoryBudget removes the authenticated user's monthly category budget.
+func ClearCategoryBudget(c *gin.Context) {
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, models.NewErrorResponse(
+			models.ErrCodeUnauthorized,
+			"User not authenticated",
+		))
+		return
+	}
+
+	categoryID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+			models.ErrCodeInvalidInput,
+			"Invalid category ID",
+		))
+		return
+	}
+
+	category, err := getVisibleCategory(userID, categoryID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, models.NewErrorResponse(
+			models.ErrCodeNotFound,
+			"Category not found",
+		))
+		return
+	}
+	if err != nil {
+		logger.Log.Errorw("Failed to get category for budget", "error", err, "categoryId", categoryID, "userId", userID)
+		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+			models.ErrCodeDatabaseError,
+			"Failed to clear category budget",
+		))
+		return
+	}
+
+	if err := db.DB.Where("user_id = ? AND category_id = ?", userID, categoryID).
+		Delete(&models.CategoryBudget{}).Error; err != nil {
+		logger.Log.Errorw("Failed to clear category budget", "error", err, "categoryId", categoryID, "userId", userID)
+		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+			models.ErrCodeDatabaseError,
+			"Failed to clear category budget",
+		))
+		return
+	}
+
+	logger.Log.Infow("Category budget cleared", "categoryId", categoryID, "userId", userID)
+	respondWithCategory(c, userID, category)
 }
 
 // DeleteCategory deletes a custom category
